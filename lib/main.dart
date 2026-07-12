@@ -164,6 +164,11 @@ class AppStore extends ChangeNotifier {
   String processingRequest = '';
   UserRole? signedInRole;
   RetailerApprovalStatus retailerApprovalStatus = RetailerApprovalStatus.pending;
+  bool authLoading = false;
+  String authEmail = '';
+  String authPassword = '';
+  String authStoreName = '';
+  String? authMessage;
 
   bool get retailerCanOrder =>
       !settings.requireStoreApproval || retailerApprovalStatus == RetailerApprovalStatus.approved;
@@ -251,6 +256,76 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  void updateAuthEmail(String value) => authEmail = value.trim();
+  void updateAuthPassword(String value) => authPassword = value;
+  void updateAuthStoreName(String value) => authStoreName = value.trim();
+
+  Future<void> signInWithSupabase() async {
+    if (authEmail.isEmpty || authPassword.isEmpty) {
+      authMessage = '이메일과 비밀번호를 입력해 주세요.';
+      notifyListeners();
+      return;
+    }
+    authLoading = true;
+    authMessage = null;
+    notifyListeners();
+    try {
+      final response = await Supabase.instance.client.auth.signInWithPassword(
+        email: authEmail,
+        password: authPassword,
+      );
+      final user = response.user;
+      if (user == null) throw const AuthException('로그인 사용자 정보를 확인할 수 없습니다.');
+      final profile = await Supabase.instance.client
+          .from('profiles')
+          .select('role, is_approved')
+          .eq('id', user.id)
+          .single();
+      final isAdmin = profile['role'] == 'admin';
+      signedInRole = isAdmin ? UserRole.admin : UserRole.retailer;
+      retailerApprovalStatus = isAdmin || profile['is_approved'] == true
+          ? RetailerApprovalStatus.approved
+          : RetailerApprovalStatus.pending;
+    } on AuthException catch (error) {
+      authMessage = error.message;
+    } on PostgrestException catch (error) {
+      authMessage = '거래처 프로필을 확인할 수 없습니다: ${error.message}';
+    } finally {
+      authLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> signUpRetailerWithSupabase() async {
+    if (authEmail.isEmpty || authPassword.length < 6 || authStoreName.isEmpty) {
+      authMessage = '상호, 이메일, 6자리 이상 비밀번호를 입력해 주세요.';
+      notifyListeners();
+      return;
+    }
+    authLoading = true;
+    authMessage = null;
+    notifyListeners();
+    try {
+      final response = await Supabase.instance.client.auth.signUp(
+        email: authEmail,
+        password: authPassword,
+        data: {'store_name': authStoreName},
+      );
+      authMessage = response.session == null
+          ? '가입 확인 이메일을 확인한 뒤 로그인해 주세요.'
+          : '가입이 완료됐습니다. 도매점 승인을 기다려 주세요.';
+      if (response.session != null) {
+        signedInRole = UserRole.retailer;
+        retailerApprovalStatus = RetailerApprovalStatus.pending;
+      }
+    } on AuthException catch (error) {
+      authMessage = error.message;
+    } finally {
+      authLoading = false;
+      notifyListeners();
+    }
+  }
+
   void approveDemoRetailer() {
     retailerApprovalStatus = RetailerApprovalStatus.approved;
     _saveRetailerApproval();
@@ -270,6 +345,7 @@ class AppStore extends ChangeNotifier {
   }
 
   void signOut() {
+    if (AppConfig.hasSupabase) Supabase.instance.client.auth.signOut();
     signedInRole = null;
     notifyListeners();
   }
@@ -472,9 +548,10 @@ class LoginPage extends StatelessWidget {
                   Text('거래처와 도매점을 연결하는 간편 발주 서비스', style: TextStyle(color: Colors.grey.shade700)),
                   const SizedBox(height: 34),
                   TextField(
+                    onChanged: store.updateAuthEmail,
                     decoration: InputDecoration(
-                      labelText: '휴대폰 번호',
-                      prefixIcon: const Icon(Icons.phone_outlined),
+                      labelText: AppConfig.hasSupabase ? '이메일' : '휴대폰 번호',
+                      prefixIcon: Icon(AppConfig.hasSupabase ? Icons.email_outlined : Icons.phone_outlined),
                       filled: true,
                       fillColor: Colors.white,
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
@@ -482,6 +559,7 @@ class LoginPage extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
                   TextField(
+                    onChanged: store.updateAuthPassword,
                     obscureText: true,
                     decoration: InputDecoration(
                       labelText: '비밀번호',
@@ -491,18 +569,49 @@ class LoginPage extends StatelessWidget {
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
                     ),
                   ),
+                  if (AppConfig.hasSupabase) ...[
+                    const SizedBox(height: 12),
+                    TextField(
+                      onChanged: store.updateAuthStoreName,
+                      decoration: InputDecoration(
+                        labelText: '소매점 상호 (신규 가입 시)',
+                        prefixIcon: const Icon(Icons.store_outlined),
+                        filled: true,
+                        fillColor: Colors.white,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 20),
-                  FilledButton.icon(
-                    onPressed: () => store.signIn(UserRole.retailer),
-                    icon: const Icon(Icons.shopping_bag_outlined),
-                    label: const Text('소매점 데모로 로그인'),
-                  ),
-                  const SizedBox(height: 10),
-                  OutlinedButton.icon(
-                    onPressed: () => store.signIn(UserRole.admin),
-                    icon: const Icon(Icons.admin_panel_settings_outlined),
-                    label: const Text('도매점 관리자 데모'),
-                  ),
+                  if (AppConfig.hasSupabase) ...[
+                    FilledButton.icon(
+                      onPressed: store.authLoading ? null : store.signInWithSupabase,
+                      icon: const Icon(Icons.login),
+                      label: Text(store.authLoading ? '처리 중...' : '로그인'),
+                    ),
+                    const SizedBox(height: 10),
+                    OutlinedButton.icon(
+                      onPressed: store.authLoading ? null : store.signUpRetailerWithSupabase,
+                      icon: const Icon(Icons.person_add_alt),
+                      label: const Text('신규 소매점 가입'),
+                    ),
+                    if (store.authMessage != null) ...[
+                      const SizedBox(height: 12),
+                      Text(store.authMessage!, textAlign: TextAlign.center),
+                    ],
+                  ] else ...[
+                    FilledButton.icon(
+                      onPressed: () => store.signIn(UserRole.retailer),
+                      icon: const Icon(Icons.shopping_bag_outlined),
+                      label: const Text('소매점 데모로 로그인'),
+                    ),
+                    const SizedBox(height: 10),
+                    OutlinedButton.icon(
+                      onPressed: () => store.signIn(UserRole.admin),
+                      icon: const Icon(Icons.admin_panel_settings_outlined),
+                      label: const Text('도매점 관리자 데모'),
+                    ),
+                  ],
                   const SizedBox(height: 18),
                   Text(
                     AppConfig.hasSupabase
