@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() => runApp(const MajangOrderApp());
 
@@ -10,6 +13,23 @@ class Product {
   final int price;
   final IconData icon;
   bool isActive;
+
+  Map<String, Object> toJson() => {
+        'name': name,
+        'detail': detail,
+        'unit': unit,
+        'price': price,
+        'isActive': isActive,
+      };
+
+  factory Product.fromJson(Map<String, dynamic> json) => Product(
+        json['name'] as String,
+        json['detail'] as String,
+        json['unit'] as String,
+        json['price'] as int,
+        Icons.inventory_2_outlined,
+        isActive: json['isActive'] as bool? ?? true,
+      );
 }
 
 class CartLine {
@@ -55,6 +75,11 @@ class DemoOrder {
 enum OrderStage { pending, weighing, customerConfirmation, preparing, rejected }
 
 class AppStore extends ChangeNotifier {
+  AppStore() {
+    _loadProducts();
+  }
+
+  static const _productsKey = 'majang_order_products_v1';
   final settings = OperationSettings();
   final List<Product> products = initialProducts
       .map((product) => Product(product.name, product.detail, product.unit, product.price, product.icon))
@@ -65,6 +90,29 @@ class AppStore extends ChangeNotifier {
   String processingRequest = '';
   UserRole? signedInRole;
   bool retailerApproved = false;
+
+  Future<void> _loadProducts() async {
+    final preferences = await SharedPreferences.getInstance();
+    final saved = preferences.getString(_productsKey);
+    if (saved == null) return;
+    try {
+      final decoded = jsonDecode(saved) as List<dynamic>;
+      products
+        ..clear()
+        ..addAll(decoded.map((item) => Product.fromJson(item as Map<String, dynamic>)));
+      notifyListeners();
+    } on FormatException {
+      // 손상된 로컬 데이터는 기본 상품 목록으로 안전하게 대체합니다.
+    }
+  }
+
+  Future<void> _saveProducts() async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString(
+      _productsKey,
+      jsonEncode(products.map((product) => product.toJson()).toList()),
+    );
+  }
 
   void signIn(UserRole role) {
     signedInRole = role;
@@ -100,11 +148,13 @@ class AppStore extends ChangeNotifier {
     required int price,
   }) {
     products.insert(0, Product(name, detail, unit, price, Icons.inventory_2_outlined));
+    _saveProducts();
     notifyListeners();
   }
 
   void toggleProduct(Product product, bool isActive) {
     product.isActive = isActive;
+    _saveProducts();
     notifyListeners();
   }
 
