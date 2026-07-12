@@ -147,11 +147,13 @@ class AppStore extends ChangeNotifier {
     _loadProducts();
     _loadOrders();
     _loadSettings();
+    _loadRetailerApproval();
   }
 
   static const _productsKey = 'majang_order_products_v1';
   static const _ordersKey = 'majang_order_orders_v1';
   static const _settingsKey = 'majang_order_settings_v1';
+  static const _retailerApprovalKey = 'majang_order_retailer_approval_v1';
   final settings = OperationSettings();
   final List<Product> products = initialProducts
       .map((product) => Product(product.name, product.detail, product.unit, product.price, product.icon))
@@ -161,7 +163,10 @@ class AppStore extends ChangeNotifier {
   DateTime requestedDeliveryDate = DateTime.now().add(const Duration(days: 1));
   String processingRequest = '';
   UserRole? signedInRole;
-  bool retailerApproved = false;
+  RetailerApprovalStatus retailerApprovalStatus = RetailerApprovalStatus.pending;
+
+  bool get retailerCanOrder =>
+      !settings.requireStoreApproval || retailerApprovalStatus == RetailerApprovalStatus.approved;
 
   Future<void> _loadProducts() async {
     final preferences = await SharedPreferences.getInstance();
@@ -226,20 +231,46 @@ class AppStore extends ChangeNotifier {
     await preferences.setString(_settingsKey, jsonEncode(settings.toJson()));
   }
 
+  Future<void> _loadRetailerApproval() async {
+    final preferences = await SharedPreferences.getInstance();
+    final saved = preferences.getString(_retailerApprovalKey);
+    retailerApprovalStatus = RetailerApprovalStatus.values.firstWhere(
+      (status) => status.name == saved,
+      orElse: () => RetailerApprovalStatus.pending,
+    );
+    notifyListeners();
+  }
+
+  Future<void> _saveRetailerApproval() async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString(_retailerApprovalKey, retailerApprovalStatus.name);
+  }
+
   void signIn(UserRole role) {
     signedInRole = role;
-    retailerApproved = role == UserRole.admin || !settings.requireStoreApproval;
     notifyListeners();
   }
 
   void approveDemoRetailer() {
-    retailerApproved = true;
+    retailerApprovalStatus = RetailerApprovalStatus.approved;
+    _saveRetailerApproval();
+    notifyListeners();
+  }
+
+  void rejectDemoRetailer() {
+    retailerApprovalStatus = RetailerApprovalStatus.rejected;
+    _saveRetailerApproval();
+    notifyListeners();
+  }
+
+  void resetDemoRetailerApproval() {
+    retailerApprovalStatus = RetailerApprovalStatus.pending;
+    _saveRetailerApproval();
     notifyListeners();
   }
 
   void signOut() {
     signedInRole = null;
-    retailerApproved = false;
     notifyListeners();
   }
 
@@ -350,6 +381,8 @@ class AppStore extends ChangeNotifier {
 
 enum UserRole { retailer, admin }
 
+enum RetailerApprovalStatus { pending, approved, rejected }
+
 class StoreScope extends InheritedNotifier<AppStore> {
   const StoreScope({required AppStore store, required super.child, super.key})
       : super(notifier: store);
@@ -401,7 +434,7 @@ class AuthGate extends StatelessWidget {
   Widget build(BuildContext context) {
     final store = StoreScope.of(context);
     if (store.signedInRole == null) return const LoginPage();
-    if (store.signedInRole == UserRole.retailer && !store.retailerApproved) {
+    if (store.signedInRole == UserRole.retailer && !store.retailerCanOrder) {
       return const ApprovalWaitingPage();
     }
     return const MainShell();
@@ -494,6 +527,7 @@ class ApprovalWaitingPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = StoreScope.of(context);
+    final isRejected = store.retailerApprovalStatus == RetailerApprovalStatus.rejected;
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -504,19 +538,25 @@ class ApprovalWaitingPage extends StatelessWidget {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.hourglass_top_rounded, size: 72, color: Color(0xFF8E2B25)),
-                  const SizedBox(height: 22),
-                  const Text('거래처 승인 대기 중', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
-                  const SizedBox(height: 10),
-                  const Text('도매점 확인이 끝나면 상품 조회와 발주를 시작할 수 있습니다.', textAlign: TextAlign.center),
-                  const SizedBox(height: 28),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton(
-                      onPressed: store.approveDemoRetailer,
-                      child: const Text('데모 승인 완료 처리'),
-                    ),
+                  Icon(
+                    isRejected ? Icons.block_outlined : Icons.hourglass_top_rounded,
+                    size: 72,
+                    color: const Color(0xFF8E2B25),
                   ),
+                  const SizedBox(height: 22),
+                  Text(
+                    isRejected ? '거래처 승인이 보류되었습니다' : '거래처 승인 대기 중',
+                    style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    isRejected
+                        ? '사업자 정보를 확인한 뒤 도매점에 문의해 주세요.'
+                        : '도매점 확인이 끝나면 상품 조회와 발주를 시작할 수 있습니다.',
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 28),
                   TextButton(onPressed: store.signOut, child: const Text('다른 계정으로 로그인')),
                 ],
               ),
@@ -585,7 +625,13 @@ class AdminDashboardPage extends StatelessWidget {
           children: [
             Expanded(child: _SummaryCard(label: '신규 발주', value: '${store.orders.length}', icon: Icons.notifications_active)),
             const SizedBox(width: 12),
-            const Expanded(child: _SummaryCard(label: '승인 대기', value: '1', icon: Icons.store_mall_directory)),
+            Expanded(
+              child: _SummaryCard(
+                label: '승인 대기',
+                value: store.retailerApprovalStatus == RetailerApprovalStatus.pending ? '1' : '0',
+                icon: Icons.store_mall_directory,
+              ),
+            ),
           ],
         ),
         const SizedBox(height: 12),
@@ -599,12 +645,52 @@ class AdminDashboardPage extends StatelessWidget {
         const SizedBox(height: 22),
         const Text('빠른 관리', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
         const SizedBox(height: 12),
-        const Card(
+        Card(
           child: Column(
             children: [
-              ListTile(leading: Icon(Icons.person_add_alt), title: Text('신규 거래처 승인'), trailing: Icon(Icons.chevron_right)),
-              Divider(height: 1),
-              ListTile(leading: Icon(Icons.add_box_outlined), title: Text('상품 등록 및 단가 관리'), trailing: Icon(Icons.chevron_right)),
+              const ListTile(
+                leading: Icon(Icons.store_outlined),
+                title: Text('우리정육점'),
+                subtitle: Text('사업자번호 123-45-67890 · 신규 거래처'),
+              ),
+              if (store.retailerApprovalStatus == RetailerApprovalStatus.pending)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: store.rejectDemoRetailer,
+                          child: const Text('승인 보류'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: FilledButton(
+                          onPressed: store.approveDemoRetailer,
+                          child: const Text('거래처 승인'),
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                ListTile(
+                  leading: Icon(
+                    store.retailerApprovalStatus == RetailerApprovalStatus.approved
+                        ? Icons.check_circle_outline
+                        : Icons.block_outlined,
+                  ),
+                  title: Text(
+                    store.retailerApprovalStatus == RetailerApprovalStatus.approved ? '승인 완료' : '승인 보류',
+                  ),
+                  trailing: TextButton(
+                    onPressed: store.resetDemoRetailerApproval,
+                    child: const Text('재심사'),
+                  ),
+                ),
+              const Divider(height: 1),
+              const ListTile(leading: Icon(Icons.add_box_outlined), title: Text('상품 등록 및 단가 관리'), trailing: Icon(Icons.chevron_right)),
             ],
           ),
         ),
