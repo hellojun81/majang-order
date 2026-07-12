@@ -136,7 +136,9 @@ class DemoOrder {
     this.settings, {
     required this.deliveryDate,
     required this.processingRequest,
+    this.id,
   });
+  final int? id;
   final String number;
   final List<CartLine> lines;
   final int estimatedTotal;
@@ -168,12 +170,48 @@ class DemoOrder {
       restoredSettings,
       deliveryDate: DateTime.parse(json['deliveryDate'] as String),
       processingRequest: json['processingRequest'] as String? ?? '',
+      id: json['id'] as int?,
     )
       ..stage = OrderStage.values.firstWhere(
         (value) => value.name == json['stage'],
         orElse: () => OrderStage.pending,
       )
       ..finalTotal = json['finalTotal'] as int?;
+  }
+
+  factory DemoOrder.fromSupabase(Map<String, dynamic> row) {
+    final restoredSettings = OperationSettings()
+      ..restore(Map<String, dynamic>.from(row['settings_snapshot'] as Map));
+    final items = (row['order_items'] as List<dynamic>? ?? []).map((item) {
+      final data = item as Map<String, dynamic>;
+      final unit = switch (data['unit']) {
+        'pack' => '팩',
+        'box' => '박스',
+        _ => 'kg',
+      };
+      return CartLine(
+        Product(
+          data['product_name'] as String,
+          '',
+          unit,
+          (data['unit_price'] as num).round(),
+          Icons.inventory_2_outlined,
+          id: data['product_id'] as int,
+        ),
+        quantity: (data['ordered_quantity'] as num).round(),
+      );
+    }).toList();
+    return DemoOrder(
+      row['order_number'] as String,
+      items,
+      (row['estimated_total'] as num).round(),
+      restoredSettings,
+      deliveryDate: DateTime.parse(row['requested_delivery_date'] as String),
+      processingRequest: row['memo'] as String? ?? '',
+      id: row['id'] as int,
+    )
+      ..stage = orderStageFromDatabase(row['status'] as String)
+      ..finalTotal = (row['final_total'] as num?)?.round();
   }
 }
 
@@ -206,6 +244,7 @@ class AppStore extends ChangeNotifier {
   String authPassword = '';
   String authStoreName = '';
   String? authMessage;
+  String? orderError;
 
   bool get retailerCanOrder =>
       !settings.requireStoreApproval || retailerApprovalStatus == RetailerApprovalStatus.approved;
@@ -324,6 +363,7 @@ class AppStore extends ChangeNotifier {
           ? RetailerApprovalStatus.approved
           : RetailerApprovalStatus.pending;
       await _loadProductsFromSupabase();
+      await _loadOrdersFromSupabase();
     } on AuthException catch (error) {
       authMessage = error.message;
     } on PostgrestException catch (error) {
@@ -477,52 +517,131 @@ class AppStore extends ChangeNotifier {
     processingRequest = value;
   }
 
-  void placeOrder() {
-    if (cart.isEmpty) return;
-    orders.insert(
-      0,
-      DemoOrder(
-        'MO-${1001 + orders.length}',
-        cart.map((line) => CartLine(line.product, quantity: line.quantity)).toList(),
+  Future<bool> placeOrder() async {
+    if (cart.isEmpty) return false;
+    orderError = null;
+    final copiedLines = cart.map((line) => CartLine(line.product, quantity: line.quantity)).toList();
+    final number = 'MO-${DateTime.now().millisecondsSinceEpoch}';
+    DemoOrder order;
+    if (AppConfig.hasSupabase && Supabase.instance.client.auth.currentUser != null) {
+      try {
+        final user = Supabase.instance.client.auth.currentUser!;
+        final inserted = await Supabase.instance.client
+            .from('orders')
+            .insert({
+              'order_number': number,
+              'retailer_id': user.id,
+              'status': 'pending',
+              'estimated_total': cartTotal,
+              'requested_delivery_date': requestedDeliveryDate.toIso8601String().split('T').first,
+              'memo': processingRequest.trim(),
+              'settings_snapshot': settings.toJson(),
+            })
+            .select('id')
+            .single();
+        final orderId = inserted['id'] as int;
+        await Supabase.instance.client.from('order_items').insert(
+              copiedLines
+                  .map((line) => {
+                        'order_id': orderId,
+                        'product_id': line.product.id,
+                        'product_name': line.product.name,
+                        'ordered_quantity': line.quantity,
+                        'unit': line.product.toSupabase()['unit'],
+                        'unit_price': line.product.price,
+                        'processing_request': processingRequest.trim(),
+                      })
+                  .toList(),
+            );
+        order = DemoOrder(
+          number,
+          copiedLines,
+          cartTotal,
+          settings.snapshot(),
+          deliveryDate: requestedDeliveryDate,
+          processingRequest: processingRequest.trim(),
+          id: orderId,
+        );
+      } on PostgrestException catch (error) {
+        orderError = error.message;
+        notifyListeners();
+        return false;
+      }
+    } else {
+      order = DemoOrder(
+        number,
+        copiedLines,
         cartTotal,
         settings.snapshot(),
         deliveryDate: requestedDeliveryDate,
         processingRequest: processingRequest.trim(),
-      ),
-    );
+      );
+    }
+    orders.insert(0, order);
     cart.clear();
     requestedDeliveryDate = DateTime.now().add(const Duration(days: 1));
     processingRequest = '';
     _saveOrders();
     notifyListeners();
+    return true;
   }
 
-  void acceptOrder(DemoOrder order) {
+  Future<void> _loadOrdersFromSupabase() async {
+    try {
+      final rows = await Supabase.instance.client
+          .from('orders')
+          .select(
+            'id, order_number, status, estimated_total, final_total, requested_delivery_date, memo, settings_snapshot, order_items(product_id, product_name, ordered_quantity, unit, unit_price)',
+          )
+          .order('id', ascending: false);
+      orders
+        ..clear()
+        ..addAll(rows.map(DemoOrder.fromSupabase));
+      notifyListeners();
+    } on PostgrestException catch (error) {
+      orderError = error.message;
+      notifyListeners();
+    }
+  }
+
+  Future<void> acceptOrder(DemoOrder order) async {
     order.stage = order.settings.confirmActualWeight ? OrderStage.weighing : OrderStage.preparing;
     if (!order.settings.confirmActualWeight) order.finalTotal = order.estimatedTotal;
+    await _syncOrderStatus(order);
     _saveOrders();
     notifyListeners();
   }
 
-  void rejectOrder(DemoOrder order) {
+  Future<void> rejectOrder(DemoOrder order) async {
     order.stage = OrderStage.rejected;
+    await _syncOrderStatus(order);
     _saveOrders();
     notifyListeners();
   }
 
-  void confirmFinalAmount(DemoOrder order, int amount) {
+  Future<void> confirmFinalAmount(DemoOrder order, int amount) async {
     order.finalTotal = amount;
     order.stage = order.settings.requireCustomerConfirmation
         ? OrderStage.customerConfirmation
         : OrderStage.preparing;
+    await _syncOrderStatus(order);
     _saveOrders();
     notifyListeners();
   }
 
-  void confirmOrderAsCustomer(DemoOrder order) {
+  Future<void> confirmOrderAsCustomer(DemoOrder order) async {
     order.stage = OrderStage.preparing;
+    await _syncOrderStatus(order);
     _saveOrders();
     notifyListeners();
+  }
+
+  Future<void> _syncOrderStatus(DemoOrder order) async {
+    if (!AppConfig.hasSupabase || order.id == null) return;
+    await Supabase.instance.client.from('orders').update({
+      'status': orderStageToDatabase(order.stage),
+      'final_total': order.finalTotal,
+    }).eq('id', order.id!);
   }
 
   void updateSettings(void Function(OperationSettings value) update) {
@@ -1086,9 +1205,14 @@ class CartPage extends StatelessWidget {
                     child: FilledButton(
                       onPressed: store.cart.isEmpty
                           ? null
-                          : () {
-                              store.placeOrder();
-                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('발주가 접수되었습니다.')));
+                          : () async {
+                              final success = await store.placeOrder();
+                              if (!context.mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(success ? '발주가 접수되었습니다.' : '발주 실패: ${store.orderError ?? '다시 시도해 주세요.'}'),
+                                ),
+                              );
                             },
                       child: const Text('발주하기'),
                     ),
@@ -1239,6 +1363,22 @@ String orderStageLabel(OrderStage stage) => switch (stage) {
       OrderStage.customerConfirmation => '고객 확인 대기',
       OrderStage.preparing => '상품 준비 중',
       OrderStage.rejected => '발주 거절',
+    };
+
+String orderStageToDatabase(OrderStage stage) => switch (stage) {
+      OrderStage.pending => 'pending',
+      OrderStage.weighing => 'price_confirmation',
+      OrderStage.customerConfirmation => 'customer_confirmation',
+      OrderStage.preparing => 'preparing',
+      OrderStage.rejected => 'rejected',
+    };
+
+OrderStage orderStageFromDatabase(String status) => switch (status) {
+      'price_confirmation' => OrderStage.weighing,
+      'customer_confirmation' => OrderStage.customerConfirmation,
+      'preparing' || 'accepted' => OrderStage.preparing,
+      'rejected' || 'cancelled' => OrderStage.rejected,
+      _ => OrderStage.pending,
     };
 
 class AdminPage extends StatelessWidget {
