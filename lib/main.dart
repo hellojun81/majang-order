@@ -217,6 +217,27 @@ class DemoOrder {
 
 enum OrderStage { pending, weighing, customerConfirmation, preparing, rejected }
 
+class RetailerProfile {
+  RetailerProfile({
+    required this.id,
+    required this.storeName,
+    required this.businessNumber,
+    required this.isApproved,
+  });
+
+  final String id;
+  final String storeName;
+  final String? businessNumber;
+  bool isApproved;
+
+  factory RetailerProfile.fromSupabase(Map<String, dynamic> row) => RetailerProfile(
+        id: row['id'] as String,
+        storeName: row['store_name'] as String,
+        businessNumber: row['business_number'] as String?,
+        isApproved: row['is_approved'] as bool? ?? false,
+      );
+}
+
 class AppStore extends ChangeNotifier {
   AppStore() {
     _loadProducts();
@@ -235,6 +256,7 @@ class AppStore extends ChangeNotifier {
       .toList();
   final List<CartLine> cart = [];
   final List<DemoOrder> orders = [];
+  final List<RetailerProfile> retailers = [];
   DateTime requestedDeliveryDate = DateTime.now().add(const Duration(days: 1));
   String processingRequest = '';
   UserRole? signedInRole;
@@ -364,6 +386,7 @@ class AppStore extends ChangeNotifier {
           : RetailerApprovalStatus.pending;
       await _loadProductsFromSupabase();
       await _loadOrdersFromSupabase();
+      if (isAdmin) await _loadRetailersFromSupabase();
     } on AuthException catch (error) {
       authMessage = error.message;
     } on PostgrestException catch (error) {
@@ -402,6 +425,41 @@ class AppStore extends ChangeNotifier {
       authLoading = false;
       notifyListeners();
     }
+  }
+
+  Future<void> _loadRetailersFromSupabase() async {
+    try {
+      final rows = await Supabase.instance.client
+          .from('profiles')
+          .select('id, store_name, business_number, is_approved')
+          .eq('role', 'retailer')
+          .order('created_at', ascending: false);
+      retailers
+        ..clear()
+        ..addAll(rows.map(RetailerProfile.fromSupabase));
+      notifyListeners();
+    } on PostgrestException catch (error) {
+      authMessage = '거래처 목록을 불러오지 못했습니다: ${error.message}';
+      notifyListeners();
+    }
+  }
+
+  Future<void> approveRetailer(RetailerProfile retailer) async {
+    await Supabase.instance.client
+        .from('profiles')
+        .update({'is_approved': true})
+        .eq('id', retailer.id);
+    retailer.isApproved = true;
+    notifyListeners();
+  }
+
+  Future<void> reconsiderRetailer(RetailerProfile retailer) async {
+    await Supabase.instance.client
+        .from('profiles')
+        .update({'is_approved': false})
+        .eq('id', retailer.id);
+    retailer.isApproved = false;
+    notifyListeners();
   }
 
   void approveDemoRetailer() {
@@ -936,7 +994,11 @@ class AdminDashboardPage extends StatelessWidget {
             Expanded(
               child: _SummaryCard(
                 label: '승인 대기',
-                value: store.retailerApprovalStatus == RetailerApprovalStatus.pending ? '1' : '0',
+                value: AppConfig.hasSupabase
+                    ? '${store.retailers.where((retailer) => !retailer.isApproved).length}'
+                    : store.retailerApprovalStatus == RetailerApprovalStatus.pending
+                        ? '1'
+                        : '0',
                 icon: Icons.store_mall_directory,
               ),
             ),
@@ -953,55 +1015,61 @@ class AdminDashboardPage extends StatelessWidget {
         const SizedBox(height: 22),
         const Text('빠른 관리', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
         const SizedBox(height: 12),
-        Card(
-          child: Column(
-            children: [
-              const ListTile(
-                leading: Icon(Icons.store_outlined),
-                title: Text('우리정육점'),
-                subtitle: Text('사업자번호 123-45-67890 · 신규 거래처'),
-              ),
-              if (store.retailerApprovalStatus == RetailerApprovalStatus.pending)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-                  child: Row(
+        if (AppConfig.hasSupabase && store.retailers.isEmpty)
+          const Card(
+            child: Padding(
+              padding: EdgeInsets.all(20),
+              child: Text('등록된 소매점 거래처가 없습니다.'),
+            ),
+          ),
+        if (AppConfig.hasSupabase)
+          ...store.retailers.map(
+            (retailer) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Card(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 14),
+                  child: Column(
                     children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: store.rejectDemoRetailer,
-                          child: const Text('승인 보류'),
-                        ),
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.store_outlined),
+                        title: Text(retailer.storeName),
+                        subtitle: Text(retailer.businessNumber?.isNotEmpty == true
+                            ? '사업자번호 ${retailer.businessNumber}'
+                            : '사업자번호 미등록'),
+                        trailing: Chip(label: Text(retailer.isApproved ? '승인 완료' : '승인 대기')),
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: FilledButton(
-                          onPressed: store.approveDemoRetailer,
-                          child: const Text('거래처 승인'),
-                        ),
+                      SizedBox(
+                        width: double.infinity,
+                        child: retailer.isApproved
+                            ? OutlinedButton(
+                                onPressed: () => store.reconsiderRetailer(retailer),
+                                child: const Text('승인 취소'),
+                              )
+                            : FilledButton(
+                                onPressed: () => store.approveRetailer(retailer),
+                                child: const Text('거래처 승인'),
+                              ),
                       ),
                     ],
                   ),
-                )
-              else
-                ListTile(
-                  leading: Icon(
-                    store.retailerApprovalStatus == RetailerApprovalStatus.approved
-                        ? Icons.check_circle_outline
-                        : Icons.block_outlined,
-                  ),
-                  title: Text(
-                    store.retailerApprovalStatus == RetailerApprovalStatus.approved ? '승인 완료' : '승인 보류',
-                  ),
-                  trailing: TextButton(
-                    onPressed: store.resetDemoRetailerApproval,
-                    child: const Text('재심사'),
-                  ),
                 ),
-              const Divider(height: 1),
-              const ListTile(leading: Icon(Icons.add_box_outlined), title: Text('상품 등록 및 단가 관리'), trailing: Icon(Icons.chevron_right)),
-            ],
+              ),
+            ),
+          )
+        else
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.store_outlined),
+              title: const Text('우리정육점'),
+              subtitle: const Text('로컬 데모 거래처'),
+              trailing: FilledButton(
+                onPressed: store.approveDemoRetailer,
+                child: const Text('승인'),
+              ),
+            ),
           ),
-        ),
       ],
     );
   }
