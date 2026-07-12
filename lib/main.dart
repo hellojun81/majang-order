@@ -44,6 +44,25 @@ class AppStore extends ChangeNotifier {
   final settings = OperationSettings();
   final List<CartLine> cart = [];
   final List<DemoOrder> orders = [];
+  UserRole? signedInRole;
+  bool retailerApproved = false;
+
+  void signIn(UserRole role) {
+    signedInRole = role;
+    retailerApproved = role == UserRole.admin || !settings.requireStoreApproval;
+    notifyListeners();
+  }
+
+  void approveDemoRetailer() {
+    retailerApproved = true;
+    notifyListeners();
+  }
+
+  void signOut() {
+    signedInRole = null;
+    retailerApproved = false;
+    notifyListeners();
+  }
 
   void add(Product product) {
     final index = cart.indexWhere((line) => line.product.name == product.name);
@@ -90,6 +109,8 @@ class AppStore extends ChangeNotifier {
   }
 }
 
+enum UserRole { retailer, admin }
+
 class StoreScope extends InheritedNotifier<AppStore> {
   const StoreScope({required AppStore store, required super.child, super.key})
       : super(notifier: store);
@@ -128,7 +149,139 @@ class _MajangOrderAppState extends State<MajangOrderApp> {
             ),
           ),
         ),
-        home: const MainShell(),
+        home: const AuthGate(),
+      ),
+    );
+  }
+}
+
+class AuthGate extends StatelessWidget {
+  const AuthGate({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final store = StoreScope.of(context);
+    if (store.signedInRole == null) return const LoginPage();
+    if (store.signedInRole == UserRole.retailer && !store.retailerApproved) {
+      return const ApprovalWaitingPage();
+    }
+    return const MainShell();
+  }
+}
+
+class LoginPage extends StatelessWidget {
+  const LoginPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final store = StoreScope.of(context);
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Container(
+                    width: 84,
+                    height: 84,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF8E2B25),
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    child: const Icon(Icons.storefront, color: Colors.white, size: 42),
+                  ),
+                  const SizedBox(height: 24),
+                  const Text('마장오더', style: TextStyle(fontSize: 34, fontWeight: FontWeight.w900)),
+                  const SizedBox(height: 8),
+                  Text('거래처와 도매점을 연결하는 간편 발주 서비스', style: TextStyle(color: Colors.grey.shade700)),
+                  const SizedBox(height: 34),
+                  TextField(
+                    decoration: InputDecoration(
+                      labelText: '휴대폰 번호',
+                      prefixIcon: const Icon(Icons.phone_outlined),
+                      filled: true,
+                      fillColor: Colors.white,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    obscureText: true,
+                    decoration: InputDecoration(
+                      labelText: '비밀번호',
+                      prefixIcon: const Icon(Icons.lock_outline),
+                      filled: true,
+                      fillColor: Colors.white,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  FilledButton.icon(
+                    onPressed: () => store.signIn(UserRole.retailer),
+                    icon: const Icon(Icons.shopping_bag_outlined),
+                    label: const Text('소매점 데모로 로그인'),
+                  ),
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    onPressed: () => store.signIn(UserRole.admin),
+                    icon: const Icon(Icons.admin_panel_settings_outlined),
+                    label: const Text('도매점 관리자 데모'),
+                  ),
+                  const SizedBox(height: 18),
+                  const Text(
+                    '현재는 화면 확인용 데모 로그인입니다. 다음 단계에서 Supabase 인증으로 교체합니다.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class ApprovalWaitingPage extends StatelessWidget {
+  const ApprovalWaitingPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final store = StoreScope.of(context);
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(28),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.hourglass_top_rounded, size: 72, color: Color(0xFF8E2B25)),
+                  const SizedBox(height: 22),
+                  const Text('거래처 승인 대기 중', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 10),
+                  const Text('도매점 확인이 끝나면 상품 조회와 발주를 시작할 수 있습니다.', textAlign: TextAlign.center),
+                  const SizedBox(height: 28),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      onPressed: store.approveDemoRetailer,
+                      child: const Text('데모 승인 완료 처리'),
+                    ),
+                  ),
+                  TextButton(onPressed: store.signOut, child: const Text('다른 계정으로 로그인')),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -146,21 +299,100 @@ class _MainShellState extends State<MainShell> {
 
   @override
   Widget build(BuildContext context) {
-    const pages = [ProductsPage(), CartPage(), OrdersPage(), AdminPage()];
+    final isAdmin = StoreScope.of(context).signedInRole == UserRole.admin;
+    final pages = isAdmin
+        ? const [AdminDashboardPage(), OrdersPage(), AdminPage(), AccountPage()]
+        : const [ProductsPage(), CartPage(), OrdersPage(), AccountPage()];
+    final destinations = isAdmin
+        ? const [
+            NavigationDestination(icon: Icon(Icons.dashboard), label: '현황'),
+            NavigationDestination(icon: Icon(Icons.receipt_long), label: '발주관리'),
+            NavigationDestination(icon: Icon(Icons.settings), label: '운영설정'),
+            NavigationDestination(icon: Icon(Icons.person), label: '내 정보'),
+          ]
+        : const [
+            NavigationDestination(icon: Icon(Icons.storefront), label: '상품'),
+            NavigationDestination(icon: Icon(Icons.shopping_cart), label: '장바구니'),
+            NavigationDestination(icon: Icon(Icons.receipt_long), label: '발주내역'),
+            NavigationDestination(icon: Icon(Icons.person), label: '내 정보'),
+          ];
     return Scaffold(
       body: SafeArea(child: IndexedStack(index: index, children: pages)),
       bottomNavigationBar: NavigationBar(
         selectedIndex: index,
         onDestinationSelected: (value) => setState(() => index = value),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.storefront), label: '상품'),
-          NavigationDestination(icon: Icon(Icons.shopping_cart), label: '장바구니'),
-          NavigationDestination(icon: Icon(Icons.receipt_long), label: '발주내역'),
-          NavigationDestination(icon: Icon(Icons.admin_panel_settings), label: '관리자'),
-        ],
+        destinations: destinations,
       ),
     );
   }
+}
+
+class AdminDashboardPage extends StatelessWidget {
+  const AdminDashboardPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final store = StoreScope.of(context);
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        const Text('오늘의 발주 현황', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 6),
+        Text('마장오더 도매점 관리자', style: TextStyle(color: Colors.grey.shade700)),
+        const SizedBox(height: 20),
+        Row(
+          children: [
+            Expanded(child: _SummaryCard(label: '신규 발주', value: '${store.orders.length}', icon: Icons.notifications_active)),
+            const SizedBox(width: 12),
+            const Expanded(child: _SummaryCard(label: '승인 대기', value: '1', icon: Icons.store_mall_directory)),
+          ],
+        ),
+        const SizedBox(height: 12),
+        const Row(
+          children: [
+            Expanded(child: _SummaryCard(label: '상품 준비', value: '0', icon: Icons.inventory_2)),
+            SizedBox(width: 12),
+            Expanded(child: _SummaryCard(label: '오늘 출고', value: '0', icon: Icons.local_shipping)),
+          ],
+        ),
+        const SizedBox(height: 22),
+        const Text('빠른 관리', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 12),
+        const Card(
+          child: Column(
+            children: [
+              ListTile(leading: Icon(Icons.person_add_alt), title: Text('신규 거래처 승인'), trailing: Icon(Icons.chevron_right)),
+              Divider(height: 1),
+              ListTile(leading: Icon(Icons.add_box_outlined), title: Text('상품 등록 및 단가 관리'), trailing: Icon(Icons.chevron_right)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SummaryCard extends StatelessWidget {
+  const _SummaryCard({required this.label, required this.value, required this.icon});
+  final String label;
+  final String value;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) => Card(
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(icon, color: const Color(0xFF8E2B25)),
+              const SizedBox(height: 16),
+              Text(value, style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900)),
+              Text(label),
+            ],
+          ),
+        ),
+      );
 }
 
 const products = [
@@ -430,6 +662,58 @@ class AdminPage extends StatelessWidget {
             ),
           ),
         ),
+      ],
+    );
+  }
+}
+
+class AccountPage extends StatelessWidget {
+  const AccountPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final store = StoreScope.of(context);
+    final isAdmin = store.signedInRole == UserRole.admin;
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        const Text('내 정보', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 18),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 28,
+                  child: Icon(isAdmin ? Icons.admin_panel_settings : Icons.store),
+                ),
+                const SizedBox(width: 14),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(isAdmin ? '마장오더 도매점' : '우리정육점', style: const TextStyle(fontWeight: FontWeight.w800)),
+                    Text(isAdmin ? '관리자 계정' : '승인된 거래처'),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        const Card(
+          child: Column(
+            children: [
+              ListTile(leading: Icon(Icons.business_outlined), title: Text('사업자 정보'), trailing: Icon(Icons.chevron_right)),
+              Divider(height: 1),
+              ListTile(leading: Icon(Icons.location_on_outlined), title: Text('배송지 관리'), trailing: Icon(Icons.chevron_right)),
+              Divider(height: 1),
+              ListTile(leading: Icon(Icons.notifications_none), title: Text('알림 설정'), trailing: Icon(Icons.chevron_right)),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+        OutlinedButton.icon(onPressed: store.signOut, icon: const Icon(Icons.logout), label: const Text('로그아웃')),
       ],
     );
   }
