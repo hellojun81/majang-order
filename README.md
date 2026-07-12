@@ -22,7 +22,7 @@
 - 발주 시점 운영 설정 스냅샷 보존
 - Supabase 초기 스키마 초안
 
-현재 앱 데이터는 메모리에 저장되는 UI 프로토타입입니다. Supabase 연결은 다음 개발 단계에서 진행합니다.
+상품, 발주와 운영 설정은 현재 기기 로컬 저장소에 보존됩니다. Supabase 프로젝트 설정값이 있으면 클라이언트가 초기화되며, 실제 서버 저장소 전환은 이어지는 단계에서 진행합니다.
 
 ## 새 PC에서 시작하기
 
@@ -40,6 +40,13 @@ flutter run
 ## 환경변수
 
 `.env.example`을 `.env`로 복사하고 값을 입력합니다. `.env`와 비밀 키는 Git에 커밋하지 않습니다. 모바일 앱에는 Supabase `anon` 키만 사용하며 `service_role` 키를 넣지 않습니다.
+
+```bash
+cp .env.example .env
+flutter run --dart-define-from-file=.env
+```
+
+설정값이 없으면 앱은 기존 로컬 데모 모드로 정상 실행됩니다.
 
 ## GitHub 작업 흐름
 

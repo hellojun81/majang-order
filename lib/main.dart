@@ -2,8 +2,20 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-void main() => runApp(const MajangOrderApp());
+import 'config/app_config.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  if (AppConfig.hasSupabase) {
+    await Supabase.initialize(
+      url: AppConfig.supabaseUrl,
+      publishableKey: AppConfig.supabaseAnonKey,
+    );
+  }
+  runApp(const MajangOrderApp());
+}
 
 class Product {
   Product(this.name, this.detail, this.unit, this.price, this.icon, {this.isActive = true});
@@ -459,10 +471,12 @@ class LoginPage extends StatelessWidget {
                     label: const Text('도매점 관리자 데모'),
                   ),
                   const SizedBox(height: 18),
-                  const Text(
-                    '현재는 화면 확인용 데모 로그인입니다. 다음 단계에서 Supabase 인증으로 교체합니다.',
+                  Text(
+                    AppConfig.hasSupabase
+                        ? 'Supabase 연결됨 · 서버 데이터 저장소 전환 준비 상태'
+                        : '로컬 데모 모드 · Supabase 설정값을 넣으면 서버 연결이 활성화됩니다.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 12),
+                    style: const TextStyle(fontSize: 12),
                   ),
                 ],
               ),
