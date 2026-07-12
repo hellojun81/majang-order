@@ -126,6 +126,23 @@ class OperationSettings {
     useStoreSpecificPricing = json['useStoreSpecificPricing'] as bool? ?? false;
     allowBackorder = json['allowBackorder'] as bool? ?? false;
   }
+
+  void restoreFromSupabase(Map<String, dynamic> row) {
+    requireStoreApproval = row['require_store_approval'] as bool? ?? true;
+    confirmActualWeight = row['confirm_actual_weight'] as bool? ?? true;
+    requireCustomerConfirmation = row['require_customer_confirmation'] as bool? ?? false;
+    useStoreSpecificPricing = row['use_store_specific_pricing'] as bool? ?? false;
+    allowBackorder = row['allow_backorder'] as bool? ?? false;
+  }
+
+  Map<String, Object> toSupabase() => {
+        'require_store_approval': requireStoreApproval,
+        'confirm_actual_weight': confirmActualWeight,
+        'require_customer_confirmation': requireCustomerConfirmation,
+        'use_store_specific_pricing': useStoreSpecificPricing,
+        'allow_backorder': allowBackorder,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      };
 }
 
 class DemoOrder {
@@ -384,6 +401,7 @@ class AppStore extends ChangeNotifier {
       retailerApprovalStatus = isAdmin || profile['is_approved'] == true
           ? RetailerApprovalStatus.approved
           : RetailerApprovalStatus.pending;
+      await _loadSettingsFromSupabase();
       await _loadProductsFromSupabase();
       await _loadOrdersFromSupabase();
       if (isAdmin) await _loadRetailersFromSupabase();
@@ -440,6 +458,23 @@ class AppStore extends ChangeNotifier {
       notifyListeners();
     } on PostgrestException catch (error) {
       authMessage = '거래처 목록을 불러오지 못했습니다: ${error.message}';
+      notifyListeners();
+    }
+  }
+
+  Future<void> _loadSettingsFromSupabase() async {
+    try {
+      final row = await Supabase.instance.client
+          .from('operation_settings')
+          .select(
+            'require_store_approval, confirm_actual_weight, require_customer_confirmation, use_store_specific_pricing, allow_backorder',
+          )
+          .eq('id', true)
+          .single();
+      settings.restoreFromSupabase(row);
+      notifyListeners();
+    } on PostgrestException catch (error) {
+      authMessage = '운영 설정을 불러오지 못했습니다: ${error.message}';
       notifyListeners();
     }
   }
@@ -702,10 +737,24 @@ class AppStore extends ChangeNotifier {
     }).eq('id', order.id!);
   }
 
-  void updateSettings(void Function(OperationSettings value) update) {
+  Future<void> updateSettings(void Function(OperationSettings value) update) async {
+    final previous = settings.snapshot();
     update(settings);
     if (!settings.confirmActualWeight) {
       settings.requireCustomerConfirmation = false;
+    }
+    if (AppConfig.hasSupabase && Supabase.instance.client.auth.currentUser != null) {
+      try {
+        await Supabase.instance.client
+            .from('operation_settings')
+            .update(settings.toSupabase())
+            .eq('id', true);
+      } on PostgrestException catch (error) {
+        settings.restore(previous.toJson());
+        authMessage = '운영 설정 저장 실패: ${error.message}';
+        notifyListeners();
+        return;
+      }
     }
     _saveSettings();
     notifyListeners();
