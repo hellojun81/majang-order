@@ -38,7 +38,11 @@ class DemoOrder {
   final List<CartLine> lines;
   final int estimatedTotal;
   final OperationSettings settings;
+  OrderStage stage = OrderStage.pending;
+  int? finalTotal;
 }
+
+enum OrderStage { pending, weighing, customerConfirmation, preparing, rejected }
 
 class AppStore extends ChangeNotifier {
   final settings = OperationSettings();
@@ -97,6 +101,30 @@ class AppStore extends ChangeNotifier {
       ),
     );
     cart.clear();
+    notifyListeners();
+  }
+
+  void acceptOrder(DemoOrder order) {
+    order.stage = order.settings.confirmActualWeight ? OrderStage.weighing : OrderStage.preparing;
+    if (!order.settings.confirmActualWeight) order.finalTotal = order.estimatedTotal;
+    notifyListeners();
+  }
+
+  void rejectOrder(DemoOrder order) {
+    order.stage = OrderStage.rejected;
+    notifyListeners();
+  }
+
+  void confirmFinalAmount(DemoOrder order, int amount) {
+    order.finalTotal = amount;
+    order.stage = order.settings.requireCustomerConfirmation
+        ? OrderStage.customerConfirmation
+        : OrderStage.preparing;
+    notifyListeners();
+  }
+
+  void confirmOrderAsCustomer(DemoOrder order) {
+    order.stage = OrderStage.preparing;
     notifyListeners();
   }
 
@@ -557,13 +585,50 @@ class CartPage extends StatelessWidget {
 class OrdersPage extends StatelessWidget {
   const OrdersPage({super.key});
 
+  Future<void> _showFinalAmountDialog(
+    BuildContext context,
+    AppStore store,
+    DemoOrder order,
+  ) async {
+    final controller = TextEditingController(text: order.estimatedTotal.toString());
+    final amount = await showDialog<int>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('최종금액 확정'),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: '실중량 반영 최종금액', suffixText: '원'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('취소')),
+          FilledButton(
+            onPressed: () {
+              final value = int.tryParse(controller.text.replaceAll(',', ''));
+              if (value != null && value > 0) Navigator.pop(context, value);
+            },
+            child: const Text('확정'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (amount != null) store.confirmFinalAmount(order, amount);
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = StoreScope.of(context);
+    final isAdmin = store.signedInRole == UserRole.admin;
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
-        const Text('발주내역', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
+        Text(isAdmin ? '발주관리' : '발주내역', style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
+        if (isAdmin) ...[
+          const SizedBox(height: 6),
+          Text('접수부터 최종금액 확정까지 처리하세요.', style: TextStyle(color: Colors.grey.shade700)),
+        ],
         const SizedBox(height: 18),
         if (store.orders.isEmpty)
           const SizedBox(height: 220, child: Center(child: Text('아직 발주내역이 없습니다.'))),
@@ -578,11 +643,44 @@ class OrdersPage extends StatelessWidget {
                   children: [
                     Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
                       Text(order.number, style: const TextStyle(fontWeight: FontWeight.w800)),
-                      Chip(label: Text(order.settings.confirmActualWeight ? '금액 확정 대기' : '접수')),
+                      Chip(label: Text(orderStageLabel(order.stage))),
                     ]),
                     Text(order.lines.map((line) => '${line.product.name} ${line.quantity}${line.product.unit}').join(' · ')),
                     const SizedBox(height: 10),
-                    Text('${order.settings.confirmActualWeight ? '예상금액' : '확정금액'} ${money(order.estimatedTotal)}원'),
+                    Text('예상금액 ${money(order.estimatedTotal)}원'),
+                    if (order.finalTotal != null)
+                      Text('최종금액 ${money(order.finalTotal!)}원', style: const TextStyle(fontWeight: FontWeight.w800)),
+                    if (isAdmin && order.stage == OrderStage.pending) ...[
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          Expanded(child: OutlinedButton(onPressed: () => store.rejectOrder(order), child: const Text('거절'))),
+                          const SizedBox(width: 8),
+                          Expanded(child: FilledButton(onPressed: () => store.acceptOrder(order), child: const Text('발주 접수'))),
+                        ],
+                      ),
+                    ],
+                    if (isAdmin && order.stage == OrderStage.weighing) ...[
+                      const SizedBox(height: 14),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: () => _showFinalAmountDialog(context, store, order),
+                          icon: const Icon(Icons.scale_outlined),
+                          label: const Text('실중량·최종금액 입력'),
+                        ),
+                      ),
+                    ],
+                    if (!isAdmin && order.stage == OrderStage.customerConfirmation) ...[
+                      const SizedBox(height: 14),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton(
+                          onPressed: () => store.confirmOrderAsCustomer(order),
+                          child: const Text('최종금액 확인'),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -593,6 +691,14 @@ class OrdersPage extends StatelessWidget {
     );
   }
 }
+
+String orderStageLabel(OrderStage stage) => switch (stage) {
+      OrderStage.pending => '신규 발주',
+      OrderStage.weighing => '실중량 입력 대기',
+      OrderStage.customerConfirmation => '고객 확인 대기',
+      OrderStage.preparing => '상품 준비 중',
+      OrderStage.rejected => '발주 거절',
+    };
 
 class AdminPage extends StatelessWidget {
   const AdminPage({super.key});
