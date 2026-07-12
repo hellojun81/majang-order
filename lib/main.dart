@@ -36,6 +36,16 @@ class CartLine {
   CartLine(this.product, {this.quantity = 1});
   final Product product;
   int quantity;
+
+  Map<String, Object> toJson() => {
+        'product': product.toJson(),
+        'quantity': quantity,
+      };
+
+  factory CartLine.fromJson(Map<String, dynamic> json) => CartLine(
+        Product.fromJson(json['product'] as Map<String, dynamic>),
+        quantity: json['quantity'] as int,
+      );
 }
 
 class OperationSettings {
@@ -51,6 +61,22 @@ class OperationSettings {
     ..requireCustomerConfirmation = requireCustomerConfirmation
     ..useStoreSpecificPricing = useStoreSpecificPricing
     ..allowBackorder = allowBackorder;
+
+  Map<String, Object> toJson() => {
+        'requireStoreApproval': requireStoreApproval,
+        'confirmActualWeight': confirmActualWeight,
+        'requireCustomerConfirmation': requireCustomerConfirmation,
+        'useStoreSpecificPricing': useStoreSpecificPricing,
+        'allowBackorder': allowBackorder,
+      };
+
+  void restore(Map<String, dynamic> json) {
+    requireStoreApproval = json['requireStoreApproval'] as bool? ?? true;
+    confirmActualWeight = json['confirmActualWeight'] as bool? ?? true;
+    requireCustomerConfirmation = json['requireCustomerConfirmation'] as bool? ?? false;
+    useStoreSpecificPricing = json['useStoreSpecificPricing'] as bool? ?? false;
+    allowBackorder = json['allowBackorder'] as bool? ?? false;
+  }
 }
 
 class DemoOrder {
@@ -70,6 +96,36 @@ class DemoOrder {
   final String processingRequest;
   OrderStage stage = OrderStage.pending;
   int? finalTotal;
+
+  Map<String, Object?> toJson() => {
+        'number': number,
+        'lines': lines.map((line) => line.toJson()).toList(),
+        'estimatedTotal': estimatedTotal,
+        'settings': settings.toJson(),
+        'deliveryDate': deliveryDate.toIso8601String(),
+        'processingRequest': processingRequest,
+        'stage': stage.name,
+        'finalTotal': finalTotal,
+      };
+
+  factory DemoOrder.fromJson(Map<String, dynamic> json) {
+    final restoredSettings = OperationSettings()..restore(json['settings'] as Map<String, dynamic>);
+    return DemoOrder(
+      json['number'] as String,
+      (json['lines'] as List<dynamic>)
+          .map((line) => CartLine.fromJson(line as Map<String, dynamic>))
+          .toList(),
+      json['estimatedTotal'] as int,
+      restoredSettings,
+      deliveryDate: DateTime.parse(json['deliveryDate'] as String),
+      processingRequest: json['processingRequest'] as String? ?? '',
+    )
+      ..stage = OrderStage.values.firstWhere(
+        (value) => value.name == json['stage'],
+        orElse: () => OrderStage.pending,
+      )
+      ..finalTotal = json['finalTotal'] as int?;
+  }
 }
 
 enum OrderStage { pending, weighing, customerConfirmation, preparing, rejected }
@@ -77,9 +133,13 @@ enum OrderStage { pending, weighing, customerConfirmation, preparing, rejected }
 class AppStore extends ChangeNotifier {
   AppStore() {
     _loadProducts();
+    _loadOrders();
+    _loadSettings();
   }
 
   static const _productsKey = 'majang_order_products_v1';
+  static const _ordersKey = 'majang_order_orders_v1';
+  static const _settingsKey = 'majang_order_settings_v1';
   final settings = OperationSettings();
   final List<Product> products = initialProducts
       .map((product) => Product(product.name, product.detail, product.unit, product.price, product.icon))
@@ -112,6 +172,46 @@ class AppStore extends ChangeNotifier {
       _productsKey,
       jsonEncode(products.map((product) => product.toJson()).toList()),
     );
+  }
+
+  Future<void> _loadOrders() async {
+    final preferences = await SharedPreferences.getInstance();
+    final saved = preferences.getString(_ordersKey);
+    if (saved == null) return;
+    try {
+      final decoded = jsonDecode(saved) as List<dynamic>;
+      orders
+        ..clear()
+        ..addAll(decoded.map((item) => DemoOrder.fromJson(item as Map<String, dynamic>)));
+      notifyListeners();
+    } on FormatException {
+      // 손상된 발주 데이터는 표시하지 않습니다.
+    }
+  }
+
+  Future<void> _saveOrders() async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString(
+      _ordersKey,
+      jsonEncode(orders.map((order) => order.toJson()).toList()),
+    );
+  }
+
+  Future<void> _loadSettings() async {
+    final preferences = await SharedPreferences.getInstance();
+    final saved = preferences.getString(_settingsKey);
+    if (saved == null) return;
+    try {
+      settings.restore(jsonDecode(saved) as Map<String, dynamic>);
+      notifyListeners();
+    } on FormatException {
+      // 손상된 설정은 기본 운영 설정으로 대체합니다.
+    }
+  }
+
+  Future<void> _saveSettings() async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString(_settingsKey, jsonEncode(settings.toJson()));
   }
 
   void signIn(UserRole role) {
@@ -194,17 +294,20 @@ class AppStore extends ChangeNotifier {
     cart.clear();
     requestedDeliveryDate = DateTime.now().add(const Duration(days: 1));
     processingRequest = '';
+    _saveOrders();
     notifyListeners();
   }
 
   void acceptOrder(DemoOrder order) {
     order.stage = order.settings.confirmActualWeight ? OrderStage.weighing : OrderStage.preparing;
     if (!order.settings.confirmActualWeight) order.finalTotal = order.estimatedTotal;
+    _saveOrders();
     notifyListeners();
   }
 
   void rejectOrder(DemoOrder order) {
     order.stage = OrderStage.rejected;
+    _saveOrders();
     notifyListeners();
   }
 
@@ -213,11 +316,13 @@ class AppStore extends ChangeNotifier {
     order.stage = order.settings.requireCustomerConfirmation
         ? OrderStage.customerConfirmation
         : OrderStage.preparing;
+    _saveOrders();
     notifyListeners();
   }
 
   void confirmOrderAsCustomer(DemoOrder order) {
     order.stage = OrderStage.preparing;
+    _saveOrders();
     notifyListeners();
   }
 
@@ -226,6 +331,7 @@ class AppStore extends ChangeNotifier {
     if (!settings.confirmActualWeight) {
       settings.requireCustomerConfirmation = false;
     }
+    _saveSettings();
     notifyListeners();
   }
 }
