@@ -18,7 +18,16 @@ Future<void> main() async {
 }
 
 class Product {
-  Product(this.name, this.detail, this.unit, this.price, this.icon, {this.isActive = true});
+  Product(
+    this.name,
+    this.detail,
+    this.unit,
+    this.price,
+    this.icon, {
+    this.id,
+    this.isActive = true,
+  });
+  final int? id;
   final String name;
   final String detail;
   final String unit;
@@ -40,8 +49,36 @@ class Product {
         json['unit'] as String,
         json['price'] as int,
         Icons.inventory_2_outlined,
+        id: json['id'] as int?,
         isActive: json['isActive'] as bool? ?? true,
       );
+
+  factory Product.fromSupabase(Map<String, dynamic> row) => Product(
+        row['name'] as String,
+        row['origin'] as String,
+        switch (row['unit']) {
+          'pack' => '팩',
+          'box' => '박스',
+          _ => 'kg',
+        },
+        (row['unit_price'] as num).round(),
+        Icons.inventory_2_outlined,
+        id: row['id'] as int,
+        isActive: row['is_active'] as bool? ?? true,
+      );
+
+  Map<String, Object> toSupabase() => {
+        'name': name,
+        'origin': detail,
+        'storage_type': 'chilled',
+        'unit': switch (unit) {
+          '팩' => 'pack',
+          '박스' => 'box',
+          _ => 'kg',
+        },
+        'unit_price': price,
+        'is_active': isActive,
+      };
 }
 
 class CartLine {
@@ -286,6 +323,7 @@ class AppStore extends ChangeNotifier {
       retailerApprovalStatus = isAdmin || profile['is_approved'] == true
           ? RetailerApprovalStatus.approved
           : RetailerApprovalStatus.pending;
+      await _loadProductsFromSupabase();
     } on AuthException catch (error) {
       authMessage = error.message;
     } on PostgrestException catch (error) {
@@ -360,19 +398,61 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  void addProduct({
+  Future<void> _loadProductsFromSupabase() async {
+    if (!AppConfig.hasSupabase || Supabase.instance.client.auth.currentUser == null) return;
+    try {
+      final rows = await Supabase.instance.client
+          .from('products')
+          .select('id, name, origin, unit, unit_price, is_active')
+          .order('id');
+      products
+        ..clear()
+        ..addAll(rows.map(Product.fromSupabase));
+      notifyListeners();
+    } on PostgrestException catch (error) {
+      authMessage = '상품을 불러오지 못했습니다: ${error.message}';
+      notifyListeners();
+    }
+  }
+
+  Future<void> addProduct({
     required String name,
     required String detail,
     required String unit,
     required int price,
   }) {
-    products.insert(0, Product(name, detail, unit, price, Icons.inventory_2_outlined));
+    final product = Product(name, detail, unit, price, Icons.inventory_2_outlined);
+    if (AppConfig.hasSupabase && Supabase.instance.client.auth.currentUser != null) {
+      return Supabase.instance.client
+          .from('products')
+          .insert(product.toSupabase())
+          .select('id, name, origin, unit, unit_price, is_active')
+          .single()
+          .then((row) {
+        products.insert(0, Product.fromSupabase(row));
+        notifyListeners();
+      });
+    }
+    products.insert(0, product);
     _saveProducts();
     notifyListeners();
+    return Future.value();
   }
 
-  void toggleProduct(Product product, bool isActive) {
+  Future<void> toggleProduct(Product product, bool isActive) async {
     product.isActive = isActive;
+    if (AppConfig.hasSupabase && product.id != null) {
+      try {
+        await Supabase.instance.client
+            .from('products')
+            .update({'is_active': isActive})
+            .eq('id', product.id!);
+      } on PostgrestException {
+        product.isActive = !isActive;
+        notifyListeners();
+        rethrow;
+      }
+    }
     _saveProducts();
     notifyListeners();
   }
