@@ -3,12 +3,13 @@ import 'package:flutter/material.dart';
 void main() => runApp(const MajangOrderApp());
 
 class Product {
-  const Product(this.name, this.detail, this.unit, this.price, this.icon);
+  Product(this.name, this.detail, this.unit, this.price, this.icon, {this.isActive = true});
   final String name;
   final String detail;
   final String unit;
   final int price;
   final IconData icon;
+  bool isActive;
 }
 
 class CartLine {
@@ -46,6 +47,9 @@ enum OrderStage { pending, weighing, customerConfirmation, preparing, rejected }
 
 class AppStore extends ChangeNotifier {
   final settings = OperationSettings();
+  final List<Product> products = initialProducts
+      .map((product) => Product(product.name, product.detail, product.unit, product.price, product.icon))
+      .toList();
   final List<CartLine> cart = [];
   final List<DemoOrder> orders = [];
   UserRole? signedInRole;
@@ -75,6 +79,21 @@ class AppStore extends ChangeNotifier {
     } else {
       cart[index].quantity++;
     }
+    notifyListeners();
+  }
+
+  void addProduct({
+    required String name,
+    required String detail,
+    required String unit,
+    required int price,
+  }) {
+    products.insert(0, Product(name, detail, unit, price, Icons.inventory_2_outlined));
+    notifyListeners();
+  }
+
+  void toggleProduct(Product product, bool isActive) {
+    product.isActive = isActive;
     notifyListeners();
   }
 
@@ -423,7 +442,7 @@ class _SummaryCard extends StatelessWidget {
       );
 }
 
-const products = [
+final initialProducts = [
   Product('한우 등심 1++', '국내산 · 냉장 · 구이용', 'kg', 89500, Icons.set_meal),
   Product('한우 국거리', '국내산 · 냉장 · 정육', 'kg', 36500, Icons.restaurant),
   Product('한돈 삼겹살', '국내산 · 냉장 · 원육', 'kg', 21800, Icons.lunch_dining),
@@ -458,7 +477,7 @@ class ProductsPage extends StatelessWidget {
         const SizedBox(height: 22),
         const Text('오늘의 상품', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
         const SizedBox(height: 12),
-        ...products.map(
+        ...store.products.where((product) => product.isActive).map(
           (product) => Padding(
             padding: const EdgeInsets.only(bottom: 12),
             child: Card(
@@ -703,6 +722,64 @@ String orderStageLabel(OrderStage stage) => switch (stage) {
 class AdminPage extends StatelessWidget {
   const AdminPage({super.key});
 
+  Future<void> _showAddProductDialog(BuildContext context, AppStore store) async {
+    final nameController = TextEditingController();
+    final detailController = TextEditingController(text: '국내산 · 냉장');
+    final priceController = TextEditingController();
+    var unit = 'kg';
+    final shouldSave = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('새 상품 등록'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(controller: nameController, autofocus: true, decoration: const InputDecoration(labelText: '상품명')),
+                const SizedBox(height: 10),
+                TextField(controller: detailController, decoration: const InputDecoration(labelText: '원산지·보관·등급')),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: priceController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: '판매 단가', suffixText: '원'),
+                ),
+                const SizedBox(height: 10),
+                DropdownButtonFormField<String>(
+                  initialValue: unit,
+                  decoration: const InputDecoration(labelText: '주문 단위'),
+                  items: const [
+                    DropdownMenuItem(value: 'kg', child: Text('kg')),
+                    DropdownMenuItem(value: '팩', child: Text('팩')),
+                    DropdownMenuItem(value: '박스', child: Text('박스')),
+                  ],
+                  onChanged: (value) => setDialogState(() => unit = value ?? unit),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('취소')),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('등록')),
+          ],
+        ),
+      ),
+    );
+    final price = int.tryParse(priceController.text.replaceAll(',', ''));
+    if (shouldSave == true && nameController.text.trim().isNotEmpty && price != null && price > 0) {
+      store.addProduct(
+        name: nameController.text.trim(),
+        detail: detailController.text.trim(),
+        unit: unit,
+        price: price,
+      );
+    }
+    nameController.dispose();
+    detailController.dispose();
+    priceController.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = StoreScope.of(context);
@@ -751,6 +828,34 @@ class AdminPage extends StatelessWidget {
                 value: settings.allowBackorder,
                 onChanged: (value) => store.updateSettings((s) => s.allowBackorder = value),
               ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('상품 관리', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+            FilledButton.icon(
+              onPressed: () => _showAddProductDialog(context, store),
+              icon: const Icon(Icons.add),
+              label: const Text('상품 등록'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Card(
+          child: Column(
+            children: [
+              for (var index = 0; index < store.products.length; index++) ...[
+                SwitchListTile(
+                  title: Text(store.products[index].name),
+                  subtitle: Text('${money(store.products[index].price)}원 / ${store.products[index].unit}'),
+                  value: store.products[index].isActive,
+                  onChanged: (value) => store.toggleProduct(store.products[index], value),
+                ),
+                if (index < store.products.length - 1) const Divider(height: 1),
+              ],
             ],
           ),
         ),
