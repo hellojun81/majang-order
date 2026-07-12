@@ -34,11 +34,20 @@ class OperationSettings {
 }
 
 class DemoOrder {
-  DemoOrder(this.number, this.lines, this.estimatedTotal, this.settings);
+  DemoOrder(
+    this.number,
+    this.lines,
+    this.estimatedTotal,
+    this.settings, {
+    required this.deliveryDate,
+    required this.processingRequest,
+  });
   final String number;
   final List<CartLine> lines;
   final int estimatedTotal;
   final OperationSettings settings;
+  final DateTime deliveryDate;
+  final String processingRequest;
   OrderStage stage = OrderStage.pending;
   int? finalTotal;
 }
@@ -52,6 +61,8 @@ class AppStore extends ChangeNotifier {
       .toList();
   final List<CartLine> cart = [];
   final List<DemoOrder> orders = [];
+  DateTime requestedDeliveryDate = DateTime.now().add(const Duration(days: 1));
+  String processingRequest = '';
   UserRole? signedInRole;
   bool retailerApproved = false;
 
@@ -108,6 +119,15 @@ class AppStore extends ChangeNotifier {
         (total, line) => total + line.product.price * line.quantity,
       );
 
+  void setDeliveryDate(DateTime value) {
+    requestedDeliveryDate = value;
+    notifyListeners();
+  }
+
+  void setProcessingRequest(String value) {
+    processingRequest = value;
+  }
+
   void placeOrder() {
     if (cart.isEmpty) return;
     orders.insert(
@@ -117,9 +137,13 @@ class AppStore extends ChangeNotifier {
         cart.map((line) => CartLine(line.product, quantity: line.quantity)).toList(),
         cartTotal,
         settings.snapshot(),
+        deliveryDate: requestedDeliveryDate,
+        processingRequest: processingRequest.trim(),
       ),
     );
     cart.clear();
+    requestedDeliveryDate = DateTime.now().add(const Duration(days: 1));
+    processingRequest = '';
     notifyListeners();
   }
 
@@ -530,6 +554,17 @@ class ProductsPage extends StatelessWidget {
 class CartPage extends StatelessWidget {
   const CartPage({super.key});
 
+  Future<void> _selectDeliveryDate(BuildContext context, AppStore store) async {
+    final selected = await showDatePicker(
+      context: context,
+      initialDate: store.requestedDeliveryDate,
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 60)),
+      helpText: '배송 희망일 선택',
+    );
+    if (selected != null) store.setDeliveryDate(selected);
+  }
+
   @override
   Widget build(BuildContext context) {
     final store = StoreScope.of(context);
@@ -570,6 +605,28 @@ class CartPage extends StatelessWidget {
               padding: const EdgeInsets.all(18),
               child: Column(
                 children: [
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.calendar_month_outlined),
+                    title: const Text('배송 희망일'),
+                    subtitle: Text(dateText(store.requestedDeliveryDate)),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => _selectDeliveryDate(context, store),
+                  ),
+                  TextField(
+                    minLines: 2,
+                    maxLines: 3,
+                    onChanged: store.setProcessingRequest,
+                    decoration: const InputDecoration(
+                      labelText: '가공·포장 요청사항',
+                      hintText: '예: 15mm 절단, 지방 제거, 1kg씩 진공포장',
+                      prefixIcon: Icon(Icons.content_cut),
+                      alignLabelWithHint: true,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Divider(),
+                  const SizedBox(height: 8),
                   Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
                     const Text('예상 합계'),
                     Text('${money(store.cartTotal)}원', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
@@ -667,6 +724,26 @@ class OrdersPage extends StatelessWidget {
                     Text(order.lines.map((line) => '${line.product.name} ${line.quantity}${line.product.unit}').join(' · ')),
                     const SizedBox(height: 10),
                     Text('예상금액 ${money(order.estimatedTotal)}원'),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        const Icon(Icons.calendar_today_outlined, size: 16),
+                        const SizedBox(width: 6),
+                        Text('배송 희망일 ${dateText(order.deliveryDate)}'),
+                      ],
+                    ),
+                    if (order.processingRequest.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8F0EC),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text('요청: ${order.processingRequest}'),
+                      ),
+                    ],
                     if (order.finalTotal != null)
                       Text('최종금액 ${money(order.finalTotal!)}원', style: const TextStyle(fontWeight: FontWeight.w800)),
                     if (isAdmin && order.stage == OrderStage.pending) ...[
@@ -939,3 +1016,6 @@ String money(int value) {
   }
   return buffer.toString();
 }
+
+String dateText(DateTime value) =>
+    '${value.year}.${value.month.toString().padLeft(2, '0')}.${value.day.toString().padLeft(2, '0')}';
