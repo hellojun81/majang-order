@@ -25,6 +25,8 @@ class Product {
     this.price,
     this.icon, {
     this.id,
+    this.animalType = '기타',
+    this.cutName = '',
     this.isActive = true,
   });
   final int? id;
@@ -33,6 +35,8 @@ class Product {
   final String unit;
   final int price;
   final IconData icon;
+  final String animalType;
+  final String cutName;
   bool isActive;
 
   Map<String, Object> toJson() => {
@@ -40,6 +44,8 @@ class Product {
         'detail': detail,
         'unit': unit,
         'price': price,
+        'animalType': animalType,
+        'cutName': cutName,
         'isActive': isActive,
       };
 
@@ -50,6 +56,8 @@ class Product {
         json['price'] as int,
         Icons.inventory_2_outlined,
         id: json['id'] as int?,
+        animalType: json['animalType'] as String? ?? '기타',
+        cutName: json['cutName'] as String? ?? '',
         isActive: json['isActive'] as bool? ?? true,
       );
 
@@ -64,11 +72,15 @@ class Product {
         (row['unit_price'] as num).round(),
         Icons.inventory_2_outlined,
         id: row['id'] as int,
+        animalType: row['animal_type'] as String? ?? '기타',
+        cutName: row['cut_name'] as String? ?? '',
         isActive: row['is_active'] as bool? ?? true,
       );
 
   Map<String, Object> toSupabase() => {
         'name': name,
+        'animal_type': animalType,
+        'cut_name': cutName,
         'origin': detail,
         'storage_type': 'chilled',
         'unit': switch (unit) {
@@ -274,7 +286,17 @@ class AppStore extends ChangeNotifier {
   static const _retailerApprovalKey = 'majang_order_retailer_approval_v1';
   final settings = OperationSettings();
   final List<Product> products = initialProducts
-      .map((product) => Product(product.name, product.detail, product.unit, product.price, product.icon))
+      .map(
+        (product) => Product(
+          product.name,
+          product.detail,
+          product.unit,
+          product.price,
+          product.icon,
+          animalType: product.animalType,
+          cutName: product.cutName,
+        ),
+      )
       .toList();
   final List<CartLine> cart = [];
   final List<DemoOrder> orders = [];
@@ -566,7 +588,7 @@ class AppStore extends ChangeNotifier {
     try {
       final rows = await Supabase.instance.client
           .from('products')
-          .select('id, name, origin, unit, unit_price, is_active')
+          .select('id, name, animal_type, cut_name, origin, unit, unit_price, is_active')
           .order('id');
       products
         ..clear()
@@ -580,16 +602,26 @@ class AppStore extends ChangeNotifier {
 
   Future<void> addProduct({
     required String name,
+    required String animalType,
+    required String cutName,
     required String detail,
     required String unit,
     required int price,
   }) {
-    final product = Product(name, detail, unit, price, Icons.inventory_2_outlined);
+    final product = Product(
+      name,
+      detail,
+      unit,
+      price,
+      Icons.inventory_2_outlined,
+      animalType: animalType,
+      cutName: cutName,
+    );
     if (AppConfig.hasSupabase && Supabase.instance.client.auth.currentUser != null) {
       return Supabase.instance.client
           .from('products')
           .insert(product.toSupabase())
-          .select('id, name, origin, unit, unit_price, is_active')
+          .select('id, name, animal_type, cut_name, origin, unit, unit_price, is_active')
           .single()
           .then((row) {
         products.insert(0, Product.fromSupabase(row));
@@ -1197,10 +1229,10 @@ class _SummaryCard extends StatelessWidget {
 }
 
 final initialProducts = [
-  Product('한우 등심 1++', '국내산 · 냉장 · 구이용', 'kg', 89500, Icons.set_meal),
-  Product('한우 국거리', '국내산 · 냉장 · 정육', 'kg', 36500, Icons.restaurant),
-  Product('한돈 삼겹살', '국내산 · 냉장 · 원육', 'kg', 21800, Icons.lunch_dining),
-  Product('미국산 갈비살', '미국산 · 냉장 · 초이스', 'kg', 27900, Icons.kebab_dining),
+  Product('한우 등심 1++', '국내산 · 냉장 · 구이용', 'kg', 89500, Icons.set_meal, animalType: '소', cutName: '등심'),
+  Product('한우 국거리', '국내산 · 냉장 · 정육', 'kg', 36500, Icons.restaurant, animalType: '소', cutName: '국거리'),
+  Product('한돈 삼겹살', '국내산 · 냉장 · 원육', 'kg', 21800, Icons.lunch_dining, animalType: '돼지', cutName: '삼겹살'),
+  Product('미국산 갈비살', '미국산 · 냉장 · 초이스', 'kg', 27900, Icons.kebab_dining, animalType: '소', cutName: '갈비'),
 ];
 
 class ProductsPage extends StatelessWidget {
@@ -1229,9 +1261,25 @@ class ProductsPage extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 22),
-        const Text('오늘의 상품', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+        const Text('축종별 상품', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
         const SizedBox(height: 12),
-        ...store.products.where((product) => product.isActive).map(
+        for (final animalType in ['소', '돼지', '닭', '양', '기타'])
+          if (store.products.any((product) => product.isActive && product.animalType == animalType)) ...[
+            Padding(
+              padding: const EdgeInsets.only(top: 8, bottom: 10),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 16,
+                    backgroundColor: const Color(0xFF8E2B25),
+                    child: Text(animalType.substring(0, 1), style: const TextStyle(color: Colors.white)),
+                  ),
+                  const SizedBox(width: 9),
+                  Text(animalType, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                ],
+              ),
+            ),
+            ...store.products.where((product) => product.isActive && product.animalType == animalType).map(
           (product) => Padding(
             padding: const EdgeInsets.only(bottom: 12),
             child: Card(
@@ -1255,6 +1303,9 @@ class ProductsPage extends StatelessWidget {
                         children: [
                           Text(product.name, style: const TextStyle(fontWeight: FontWeight.w700)),
                           const SizedBox(height: 4),
+                          if (product.cutName.isNotEmpty)
+                            Text('${product.animalType} 〉 ${product.cutName}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                          if (product.cutName.isNotEmpty) const SizedBox(height: 3),
                           Text(product.detail, style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
                           const SizedBox(height: 8),
                           Text('${money(product.price)}원 / ${product.unit}', style: const TextStyle(fontWeight: FontWeight.w700)),
@@ -1276,6 +1327,7 @@ class ProductsPage extends StatelessWidget {
             ),
           ),
         ),
+          ],
       ],
     );
   }
@@ -1552,9 +1604,11 @@ class AdminPage extends StatelessWidget {
 
   Future<void> _showAddProductDialog(BuildContext context, AppStore store) async {
     final nameController = TextEditingController();
+    final cutController = TextEditingController();
     final detailController = TextEditingController(text: '국내산 · 냉장');
     final priceController = TextEditingController();
     var unit = 'kg';
+    var animalType = '소';
     final shouldSave = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -1565,6 +1619,21 @@ class AdminPage extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 TextField(controller: nameController, autofocus: true, decoration: const InputDecoration(labelText: '상품명')),
+                const SizedBox(height: 10),
+                DropdownButtonFormField<String>(
+                  initialValue: animalType,
+                  decoration: const InputDecoration(labelText: '축종'),
+                  items: const [
+                    DropdownMenuItem(value: '소', child: Text('소')),
+                    DropdownMenuItem(value: '돼지', child: Text('돼지')),
+                    DropdownMenuItem(value: '닭', child: Text('닭')),
+                    DropdownMenuItem(value: '양', child: Text('양')),
+                    DropdownMenuItem(value: '기타', child: Text('기타')),
+                  ],
+                  onChanged: (value) => setDialogState(() => animalType = value ?? animalType),
+                ),
+                const SizedBox(height: 10),
+                TextField(controller: cutController, decoration: const InputDecoration(labelText: '부위', hintText: '예: 등심, 삼겹살, 갈비')),
                 const SizedBox(height: 10),
                 TextField(controller: detailController, decoration: const InputDecoration(labelText: '원산지·보관·등급')),
                 const SizedBox(height: 10),
@@ -1598,12 +1667,15 @@ class AdminPage extends StatelessWidget {
     if (shouldSave == true && nameController.text.trim().isNotEmpty && price != null && price > 0) {
       store.addProduct(
         name: nameController.text.trim(),
+        animalType: animalType,
+        cutName: cutController.text.trim(),
         detail: detailController.text.trim(),
         unit: unit,
         price: price,
       );
     }
     nameController.dispose();
+    cutController.dispose();
     detailController.dispose();
     priceController.dispose();
   }
@@ -1678,7 +1750,9 @@ class AdminPage extends StatelessWidget {
               for (var index = 0; index < store.products.length; index++) ...[
                 SwitchListTile(
                   title: Text(store.products[index].name),
-                  subtitle: Text('${money(store.products[index].price)}원 / ${store.products[index].unit}'),
+                  subtitle: Text(
+                    '${store.products[index].animalType} 〉 ${store.products[index].cutName.isEmpty ? '부위 미지정' : store.products[index].cutName} · ${money(store.products[index].price)}원 / ${store.products[index].unit}',
+                  ),
                   value: store.products[index].isActive,
                   onChanged: (value) => store.toggleProduct(store.products[index], value),
                 ),
