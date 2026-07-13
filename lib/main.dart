@@ -40,7 +40,7 @@ class Product {
   final String name;
   final String detail;
   final String unit;
-  final int price;
+  int price;
   final IconData icon;
   final String animalType;
   final String cutName;
@@ -49,7 +49,7 @@ class Product {
   final String notes;
   final String? createdBy;
   final DateTime? createdAt;
-  final DateTime? updatedAt;
+  DateTime? updatedAt;
   bool isActive;
 
   Map<String, Object> toJson() => {
@@ -811,6 +811,36 @@ class AppStore extends ChangeNotifier {
         product.orderUnits
           ..clear()
           ..addAll(previous);
+        notifyListeners();
+        rethrow;
+      }
+    }
+    _saveProducts();
+  }
+
+  Future<void> updateProductPrice(
+    Product product,
+    int newPrice,
+    String note,
+  ) async {
+    final previousPrice = product.price;
+    final previousUpdatedAt = product.updatedAt;
+    product.price = newPrice;
+    product.updatedAt = DateTime.now();
+    notifyListeners();
+    if (AppConfig.hasSupabase && product.id != null) {
+      try {
+        await Supabase.instance.client.rpc(
+          'change_product_price',
+          params: {
+            'p_product_id': product.id,
+            'p_new_price': newPrice,
+            'p_note': note.trim(),
+          },
+        );
+      } on PostgrestException {
+        product.price = previousPrice;
+        product.updatedAt = previousUpdatedAt;
         notifyListeners();
         rethrow;
       }
@@ -2248,6 +2278,98 @@ Future<void> showOrderUnitDialog(
   }
 }
 
+Future<void> showChangePriceDialog(
+  BuildContext context,
+  AppStore store,
+  Product product,
+) async {
+  final priceController = TextEditingController(text: product.price.toString());
+  final noteController = TextEditingController();
+  final shouldSave = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text('${product.name} 단가 변경'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('현재 ${money(product.price)}원 / ${product.unit}'),
+          const SizedBox(height: 14),
+          TextField(
+            controller: priceController,
+            autofocus: true,
+            keyboardType: TextInputType.number,
+            decoration: InputDecoration(
+              labelText: '새 기준단가',
+              suffixText: '원 / ${product.unit}',
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: noteController,
+            maxLines: 2,
+            decoration: const InputDecoration(
+              labelText: '변경 사유(선택)',
+              hintText: '예: 오늘 매입가 반영',
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('취소'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('변경'),
+        ),
+      ],
+    ),
+  );
+  final newPrice = int.tryParse(priceController.text.replaceAll(',', ''));
+  if (shouldSave != true) {
+    priceController.dispose();
+    noteController.dispose();
+    return;
+  }
+  if (newPrice == null || newPrice <= 0) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('0원보다 큰 단가를 입력해 주세요.')),
+      );
+    }
+  } else if (newPrice == product.price) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('현재 단가와 같습니다.')),
+      );
+    }
+  } else {
+    try {
+      await store.updateProductPrice(product, newPrice, noteController.text);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content:
+                  Text('${product.name} 단가가 ${money(newPrice)}원으로 변경됐습니다.')),
+        );
+      }
+    } on PostgrestException catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('단가 변경 실패: ${error.message}'),
+            backgroundColor: Colors.red.shade700,
+          ),
+        );
+      }
+    }
+  }
+  priceController.dispose();
+  noteController.dispose();
+}
+
 class ProductManagementPage extends StatefulWidget {
   const ProductManagementPage({super.key});
 
@@ -2382,15 +2504,35 @@ class _ProductManagementPageState extends State<ProductManagementPage> {
                   Align(
                     alignment: Alignment.centerRight,
                     child: Padding(
-                      padding: const EdgeInsets.only(right: 12, bottom: 8),
-                      child: OutlinedButton.icon(
-                        onPressed: () => showOrderUnitDialog(
-                          context,
-                          store,
-                          products[index],
-                        ),
-                        icon: const Icon(Icons.straighten, size: 18),
-                        label: const Text('발주단위 설정'),
+                      padding: const EdgeInsets.only(
+                        left: 12,
+                        right: 12,
+                        bottom: 8,
+                      ),
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        alignment: WrapAlignment.end,
+                        children: [
+                          OutlinedButton.icon(
+                            onPressed: () => showChangePriceDialog(
+                              context,
+                              store,
+                              products[index],
+                            ),
+                            icon: const Icon(Icons.payments_outlined, size: 18),
+                            label: const Text('단가 변경'),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: () => showOrderUnitDialog(
+                              context,
+                              store,
+                              products[index],
+                            ),
+                            icon: const Icon(Icons.straighten, size: 18),
+                            label: const Text('발주단위 설정'),
+                          ),
+                        ],
                       ),
                     ),
                   ),
