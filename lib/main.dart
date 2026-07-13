@@ -28,12 +28,14 @@ class Product {
     this.animalType = '기타',
     this.cutName = '',
     this.subItems = const [],
+    List<String>? orderUnits,
     this.notes = '',
     this.createdBy,
     this.createdAt,
     this.updatedAt,
     this.isActive = true,
-  });
+  }) : orderUnits =
+            orderUnits == null || orderUnits.isEmpty ? [unit] : orderUnits;
   final int? id;
   final String name;
   final String detail;
@@ -43,6 +45,7 @@ class Product {
   final String animalType;
   final String cutName;
   final List<String> subItems;
+  final List<String> orderUnits;
   final String notes;
   final String? createdBy;
   final DateTime? createdAt;
@@ -57,6 +60,7 @@ class Product {
         'animalType': animalType,
         'cutName': cutName,
         'subItems': subItems,
+        'orderUnits': orderUnits,
         'notes': notes,
         'createdBy': createdBy ?? '',
         'createdAt': createdAt?.toIso8601String() ?? '',
@@ -74,6 +78,9 @@ class Product {
         animalType: json['animalType'] as String? ?? '기타',
         cutName: json['cutName'] as String? ?? '',
         subItems: (json['subItems'] as List<dynamic>? ?? []).cast<String>(),
+        orderUnits: (json['orderUnits'] as List<dynamic>? ?? [])
+            .map((value) => value as String)
+            .toList(),
         notes: json['notes'] as String? ?? '',
         createdBy: json['createdBy'] as String?,
         createdAt: DateTime.tryParse(json['createdAt'] as String? ?? ''),
@@ -102,6 +109,14 @@ class Product {
                   (a['sort_order'] as int).compareTo(b['sort_order'] as int)))
             .map((item) => item['name'] as String)
             .toList(),
+        orderUnits: ((row['product_order_units'] as List<dynamic>? ?? [])
+                .map((item) => item as Map<String, dynamic>)
+                .where((item) => item['is_active'] != false)
+                .toList()
+              ..sort((a, b) =>
+                  (a['sort_order'] as int).compareTo(b['sort_order'] as int)))
+            .map((item) => unitFromDatabase(item['unit_code'] as String))
+            .toList(),
         notes: row['notes'] as String? ?? '',
         createdBy: row['created_by'] as String?,
         createdAt: DateTime.tryParse(row['created_at'] as String? ?? ''),
@@ -128,20 +143,42 @@ class Product {
 }
 
 class CartLine {
-  CartLine(this.product, {this.quantity = 1});
+  CartLine(this.product, {this.quantity = 1, String? orderUnit})
+      : orderUnit = orderUnit ?? product.unit;
   final Product product;
   int quantity;
+  String orderUnit;
+
+  bool get requiresActualWeight => orderUnit != product.unit;
+  int get estimatedAmount =>
+      requiresActualWeight ? 0 : product.price * quantity;
 
   Map<String, Object> toJson() => {
         'product': product.toJson(),
         'quantity': quantity,
+        'orderUnit': orderUnit,
       };
 
   factory CartLine.fromJson(Map<String, dynamic> json) => CartLine(
         Product.fromJson(json['product'] as Map<String, dynamic>),
         quantity: json['quantity'] as int,
+        orderUnit: json['orderUnit'] as String?,
       );
 }
+
+String unitFromDatabase(String unit) => switch (unit) {
+      'pack' => '팩',
+      'box' => '박스',
+      'piece' => '개',
+      _ => 'kg',
+    };
+
+String unitToDatabase(String unit) => switch (unit) {
+      '팩' => 'pack',
+      '박스' => 'box',
+      '개' => 'piece',
+      _ => 'kg',
+    };
 
 class OperationSettings {
   bool requireStoreApproval = true;
@@ -251,21 +288,22 @@ class DemoOrder {
       ..restore(Map<String, dynamic>.from(row['settings_snapshot'] as Map));
     final items = (row['order_items'] as List<dynamic>? ?? []).map((item) {
       final data = item as Map<String, dynamic>;
-      final unit = switch (data['unit']) {
-        'pack' => '팩',
-        'box' => '박스',
-        _ => 'kg',
-      };
+      final orderUnit = unitFromDatabase(data['unit'] as String);
+      final pricingUnit = unitFromDatabase(
+        data['pricing_unit'] as String? ?? data['unit'] as String,
+      );
       return CartLine(
         Product(
           data['product_name'] as String,
           '',
-          unit,
+          pricingUnit,
           (data['unit_price'] as num).round(),
           Icons.inventory_2_outlined,
           id: data['product_id'] as int,
+          orderUnits: [orderUnit],
         ),
         quantity: (data['ordered_quantity'] as num).round(),
+        orderUnit: orderUnit,
       );
     }).toList();
     return DemoOrder(
@@ -335,6 +373,7 @@ class AppStore extends ChangeNotifier {
           animalType: product.animalType,
           cutName: product.cutName,
           subItems: product.subItems,
+          orderUnits: product.orderUnits,
           notes: product.notes,
         ),
       )
@@ -636,7 +675,7 @@ class AppStore extends ChangeNotifier {
       final rows = await Supabase.instance.client
           .from('products')
           .select(
-            'id, name, animal_type, cut_name, origin, unit, unit_price, is_active, notes, created_by, created_at, updated_at, product_sub_items(name, sort_order, is_active)',
+            'id, name, animal_type, cut_name, origin, unit, unit_price, is_active, notes, created_by, created_at, updated_at, product_sub_items(name, sort_order, is_active), product_order_units(unit_code, sort_order, is_active)',
           )
           .order('id');
       products
@@ -694,10 +733,24 @@ class AppStore extends ChangeNotifier {
               },
           ]);
         }
+        await Supabase.instance.client.from('product_order_units').insert({
+          'product_id': productId,
+          'unit_code': unitToDatabase(unit),
+          'settlement_method': 'ordered_quantity',
+          'is_default': true,
+          'sort_order': 0,
+        });
         final completeRow = Map<String, dynamic>.from(row)
           ..['product_sub_items'] = [
             for (var index = 0; index < subItems.length; index++)
               {'name': subItems[index], 'sort_order': index, 'is_active': true},
+          ]
+          ..['product_order_units'] = [
+            {
+              'unit_code': unitToDatabase(unit),
+              'sort_order': 0,
+              'is_active': true,
+            },
           ];
         products.insert(0, Product.fromSupabase(completeRow));
         notifyListeners();
@@ -726,16 +779,63 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> updateProductOrderUnits(
+    Product product,
+    List<String> selectedUnits,
+  ) async {
+    final units = <String>{product.unit, ...selectedUnits}.toList();
+    final previous = List<String>.from(product.orderUnits);
+    product.orderUnits
+      ..clear()
+      ..addAll(units);
+    notifyListeners();
+    if (AppConfig.hasSupabase && product.id != null) {
+      try {
+        await Supabase.instance.client
+            .from('product_order_units')
+            .delete()
+            .eq('product_id', product.id!);
+        await Supabase.instance.client.from('product_order_units').insert([
+          for (var index = 0; index < units.length; index++)
+            {
+              'product_id': product.id,
+              'unit_code': unitToDatabase(units[index]),
+              'settlement_method': units[index] == product.unit
+                  ? 'ordered_quantity'
+                  : 'actual_weight',
+              'is_default': units[index] == product.unit,
+              'sort_order': index,
+            },
+        ]);
+      } on PostgrestException {
+        product.orderUnits
+          ..clear()
+          ..addAll(previous);
+        notifyListeners();
+        rethrow;
+      }
+    }
+    _saveProducts();
+  }
+
   void changeQuantity(CartLine line, int delta) {
     line.quantity += delta;
     if (line.quantity <= 0) cart.remove(line);
     notifyListeners();
   }
 
+  void changeOrderUnit(CartLine line, String unit) {
+    line.orderUnit = unit;
+    notifyListeners();
+  }
+
   int get cartTotal => cart.fold(
         0,
-        (total, line) => total + line.product.price * line.quantity,
+        (total, line) => total + line.estimatedAmount,
       );
+
+  bool get hasActualWeightItems =>
+      cart.any((line) => line.requiresActualWeight);
 
   void setDeliveryDate(DateTime value) {
     requestedDeliveryDate = value;
@@ -749,8 +849,16 @@ class AppStore extends ChangeNotifier {
   Future<bool> placeOrder() async {
     if (cart.isEmpty) return false;
     orderError = null;
+    final orderSettings = settings.snapshot();
+    if (hasActualWeightItems) {
+      orderSettings.confirmActualWeight = true;
+    }
     final copiedLines = cart
-        .map((line) => CartLine(line.product, quantity: line.quantity))
+        .map((line) => CartLine(
+              line.product,
+              quantity: line.quantity,
+              orderUnit: line.orderUnit,
+            ))
         .toList();
     final number = 'MO-${DateTime.now().millisecondsSinceEpoch}';
     DemoOrder order;
@@ -768,7 +876,7 @@ class AppStore extends ChangeNotifier {
               'requested_delivery_date':
                   requestedDeliveryDate.toIso8601String().split('T').first,
               'memo': processingRequest.trim(),
-              'settings_snapshot': settings.toJson(),
+              'settings_snapshot': orderSettings.toJson(),
             })
             .select('id')
             .single();
@@ -780,7 +888,11 @@ class AppStore extends ChangeNotifier {
                         'product_id': line.product.id,
                         'product_name': line.product.name,
                         'ordered_quantity': line.quantity,
-                        'unit': line.product.toSupabase()['unit'],
+                        'unit': unitToDatabase(line.orderUnit),
+                        'pricing_unit': unitToDatabase(line.product.unit),
+                        'settlement_method': line.requiresActualWeight
+                            ? 'actual_weight'
+                            : 'ordered_quantity',
                         'unit_price': line.product.price,
                         'processing_request': processingRequest.trim(),
                       })
@@ -790,7 +902,7 @@ class AppStore extends ChangeNotifier {
           number,
           copiedLines,
           cartTotal,
-          settings.snapshot(),
+          orderSettings,
           deliveryDate: requestedDeliveryDate,
           processingRequest: processingRequest.trim(),
           id: orderId,
@@ -805,7 +917,7 @@ class AppStore extends ChangeNotifier {
         number,
         copiedLines,
         cartTotal,
-        settings.snapshot(),
+        orderSettings,
         deliveryDate: requestedDeliveryDate,
         processingRequest: processingRequest.trim(),
       );
@@ -824,7 +936,7 @@ class AppStore extends ChangeNotifier {
       final rows = await Supabase.instance.client
           .from('orders')
           .select(
-            'id, order_number, status, estimated_total, final_total, requested_delivery_date, memo, settings_snapshot, order_items(product_id, product_name, ordered_quantity, unit, unit_price)',
+            'id, order_number, status, estimated_total, final_total, requested_delivery_date, memo, settings_snapshot, order_items(product_id, product_name, ordered_quantity, unit, pricing_unit, settlement_method, unit_price)',
           )
           .order('id', ascending: false);
       orders
@@ -1597,25 +1709,61 @@ class CartPage extends StatelessWidget {
                     itemBuilder: (context, index) {
                       final line = store.cart[index];
                       return Card(
-                        child: ListTile(
-                          title: Text(line.product.name,
-                              style:
-                                  const TextStyle(fontWeight: FontWeight.w700)),
-                          subtitle: Text(
-                              '${money(line.product.price * line.quantity)}원'),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
+                        child: Padding(
+                          padding: const EdgeInsets.all(14),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              IconButton(
-                                  onPressed: () =>
-                                      store.changeQuantity(line, -1),
-                                  icon:
-                                      const Icon(Icons.remove_circle_outline)),
-                              Text('${line.quantity} ${line.product.unit}'),
-                              IconButton(
-                                  onPressed: () =>
-                                      store.changeQuantity(line, 1),
-                                  icon: const Icon(Icons.add_circle_outline)),
+                              Text(line.product.name,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w700)),
+                              const SizedBox(height: 4),
+                              Text(
+                                line.requiresActualWeight
+                                    ? 'kg 기준단가 ${money(line.product.price)}원 · 실중량 확정 후 정산'
+                                    : '예상 ${money(line.estimatedAmount)}원',
+                                style: TextStyle(
+                                  color: line.requiresActualWeight
+                                      ? const Color(0xFF8E2B25)
+                                      : Colors.grey.shade700,
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              Row(
+                                children: [
+                                  const Text('발주단위'),
+                                  const SizedBox(width: 8),
+                                  DropdownButton<String>(
+                                    value: line.orderUnit,
+                                    items: [
+                                      for (final unit
+                                          in line.product.orderUnits)
+                                        DropdownMenuItem(
+                                          value: unit,
+                                          child: Text(unit),
+                                        ),
+                                    ],
+                                    onChanged: (value) {
+                                      if (value != null) {
+                                        store.changeOrderUnit(line, value);
+                                      }
+                                    },
+                                  ),
+                                  const Spacer(),
+                                  IconButton(
+                                    onPressed: () =>
+                                        store.changeQuantity(line, -1),
+                                    icon:
+                                        const Icon(Icons.remove_circle_outline),
+                                  ),
+                                  Text('${line.quantity}'),
+                                  IconButton(
+                                    onPressed: () =>
+                                        store.changeQuantity(line, 1),
+                                    icon: const Icon(Icons.add_circle_outline),
+                                  ),
+                                ],
+                              ),
                             ],
                           ),
                         ),
@@ -1654,7 +1802,10 @@ class CartPage extends StatelessWidget {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         const Text('예상 합계'),
-                        Text('${money(store.cartTotal)}원',
+                        Text(
+                            store.hasActualWeightItems
+                                ? '${money(store.cartTotal)}원 + 실중량 정산'
+                                : '${money(store.cartTotal)}원',
                             style: const TextStyle(
                                 fontSize: 20, fontWeight: FontWeight.w800)),
                       ]),
@@ -1768,7 +1919,7 @@ class OrdersPage extends StatelessWidget {
                         ]),
                     Text(order.lines
                         .map((line) =>
-                            '${line.product.name} ${line.quantity}${line.product.unit}')
+                            '${line.product.name} ${line.quantity}${line.orderUnit}')
                         .join(' · ')),
                     const SizedBox(height: 10),
                     Text('예상금액 ${money(order.estimatedTotal)}원'),
@@ -2028,6 +2179,75 @@ Future<void> showAddProductDialog(BuildContext context, AppStore store) async {
   notesController.dispose();
 }
 
+Future<void> showOrderUnitDialog(
+  BuildContext context,
+  AppStore store,
+  Product product,
+) async {
+  final selected = <String>{...product.orderUnits, product.unit};
+  final shouldSave = await showDialog<bool>(
+    context: context,
+    builder: (context) => StatefulBuilder(
+      builder: (context, setDialogState) => AlertDialog(
+        title: Text('${product.name} 발주단위'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('기준단가는 ${money(product.price)}원 / ${product.unit}입니다.'),
+            const SizedBox(height: 8),
+            const Text('박스·개·팩 발주는 실중량으로 최종 정산합니다.'),
+            const SizedBox(height: 14),
+            for (final unit in ['kg', '박스', '개', '팩'])
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(unit == product.unit ? '$unit (기준단위)' : unit),
+                value: selected.contains(unit),
+                onChanged: unit == product.unit
+                    ? null
+                    : (value) => setDialogState(() {
+                          if (value == true) {
+                            selected.add(unit);
+                          } else {
+                            selected.remove(unit);
+                          }
+                        }),
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('저장'),
+          ),
+        ],
+      ),
+    ),
+  );
+  if (shouldSave != true) return;
+  try {
+    await store.updateProductOrderUnits(product, selected.toList());
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${product.name} 발주단위가 저장됐습니다.')),
+      );
+    }
+  } on PostgrestException catch (error) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('발주단위 저장 실패: ${error.message}'),
+          backgroundColor: Colors.red.shade700,
+        ),
+      );
+    }
+  }
+}
+
 class ProductManagementPage extends StatefulWidget {
   const ProductManagementPage({super.key});
 
@@ -2148,6 +2368,7 @@ class _ProductManagementPageState extends State<ProductManagementPage> {
                         if (products[index].subItems.isNotEmpty)
                           '세부: ${products[index].subItems.join(', ')}',
                         '${money(products[index].price)}원 / ${products[index].unit}',
+                        '발주단위: ${products[index].orderUnits.join(', ')}',
                         if (products[index].notes.isNotEmpty)
                           '비고: ${products[index].notes}',
                         if (products[index].createdAt != null)
@@ -2157,6 +2378,21 @@ class _ProductManagementPageState extends State<ProductManagementPage> {
                     value: products[index].isActive,
                     onChanged: (value) =>
                         store.toggleProduct(products[index], value),
+                  ),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 12, bottom: 8),
+                      child: OutlinedButton.icon(
+                        onPressed: () => showOrderUnitDialog(
+                          context,
+                          store,
+                          products[index],
+                        ),
+                        icon: const Icon(Icons.straighten, size: 18),
+                        label: const Text('발주단위 설정'),
+                      ),
+                    ),
                   ),
                   if (index < products.length - 1) const Divider(height: 1),
                 ],
