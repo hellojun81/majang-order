@@ -95,10 +95,11 @@ class Product {
         animalType: row['animal_type'] as String? ?? '기타',
         cutName: row['cut_name'] as String? ?? '',
         subItems: ((row['product_sub_items'] as List<dynamic>? ?? [])
-              .map((item) => item as Map<String, dynamic>)
-              .where((item) => item['is_active'] != false)
-              .toList()
-            ..sort((a, b) => (a['sort_order'] as int).compareTo(b['sort_order'] as int)))
+                .map((item) => item as Map<String, dynamic>)
+                .where((item) => item['is_active'] != false)
+                .toList()
+              ..sort((a, b) =>
+                  (a['sort_order'] as int).compareTo(b['sort_order'] as int)))
             .map((item) => item['name'] as String)
             .toList(),
         notes: row['notes'] as String? ?? '',
@@ -167,7 +168,8 @@ class OperationSettings {
   void restore(Map<String, dynamic> json) {
     requireStoreApproval = json['requireStoreApproval'] as bool? ?? true;
     confirmActualWeight = json['confirmActualWeight'] as bool? ?? true;
-    requireCustomerConfirmation = json['requireCustomerConfirmation'] as bool? ?? false;
+    requireCustomerConfirmation =
+        json['requireCustomerConfirmation'] as bool? ?? false;
     useStoreSpecificPricing = json['useStoreSpecificPricing'] as bool? ?? false;
     allowBackorder = json['allowBackorder'] as bool? ?? false;
   }
@@ -175,8 +177,10 @@ class OperationSettings {
   void restoreFromSupabase(Map<String, dynamic> row) {
     requireStoreApproval = row['require_store_approval'] as bool? ?? true;
     confirmActualWeight = row['confirm_actual_weight'] as bool? ?? true;
-    requireCustomerConfirmation = row['require_customer_confirmation'] as bool? ?? false;
-    useStoreSpecificPricing = row['use_store_specific_pricing'] as bool? ?? false;
+    requireCustomerConfirmation =
+        row['require_customer_confirmation'] as bool? ?? false;
+    useStoreSpecificPricing =
+        row['use_store_specific_pricing'] as bool? ?? false;
     allowBackorder = row['allow_backorder'] as bool? ?? false;
   }
 
@@ -222,7 +226,8 @@ class DemoOrder {
       };
 
   factory DemoOrder.fromJson(Map<String, dynamic> json) {
-    final restoredSettings = OperationSettings()..restore(json['settings'] as Map<String, dynamic>);
+    final restoredSettings = OperationSettings()
+      ..restore(json['settings'] as Map<String, dynamic>);
     return DemoOrder(
       json['number'] as String,
       (json['lines'] as List<dynamic>)
@@ -292,7 +297,8 @@ class RetailerProfile {
   final String? businessNumber;
   bool isApproved;
 
-  factory RetailerProfile.fromSupabase(Map<String, dynamic> row) => RetailerProfile(
+  factory RetailerProfile.fromSupabase(Map<String, dynamic> row) =>
+      RetailerProfile(
         id: row['id'] as String,
         storeName: row['store_name'] as String,
         businessNumber: row['business_number'] as String?,
@@ -340,7 +346,8 @@ class AppStore extends ChangeNotifier {
   String processingRequest = '';
   UserRole? signedInRole;
   bool initializing = AppConfig.hasSupabase;
-  RetailerApprovalStatus retailerApprovalStatus = RetailerApprovalStatus.pending;
+  RetailerApprovalStatus retailerApprovalStatus =
+      RetailerApprovalStatus.pending;
   bool authLoading = false;
   String authEmail = '';
   String authPassword = '';
@@ -349,7 +356,8 @@ class AppStore extends ChangeNotifier {
   String? orderError;
 
   bool get retailerCanOrder =>
-      !settings.requireStoreApproval || retailerApprovalStatus == RetailerApprovalStatus.approved;
+      !settings.requireStoreApproval ||
+      retailerApprovalStatus == RetailerApprovalStatus.approved;
 
   Future<void> _loadProducts() async {
     final preferences = await SharedPreferences.getInstance();
@@ -359,7 +367,8 @@ class AppStore extends ChangeNotifier {
       final decoded = jsonDecode(saved) as List<dynamic>;
       products
         ..clear()
-        ..addAll(decoded.map((item) => Product.fromJson(item as Map<String, dynamic>)));
+        ..addAll(decoded
+            .map((item) => Product.fromJson(item as Map<String, dynamic>)));
       notifyListeners();
     } on FormatException {
       // 손상된 로컬 데이터는 기본 상품 목록으로 안전하게 대체합니다.
@@ -382,7 +391,8 @@ class AppStore extends ChangeNotifier {
       final decoded = jsonDecode(saved) as List<dynamic>;
       orders
         ..clear()
-        ..addAll(decoded.map((item) => DemoOrder.fromJson(item as Map<String, dynamic>)));
+        ..addAll(decoded
+            .map((item) => DemoOrder.fromJson(item as Map<String, dynamic>)));
       notifyListeners();
     } on FormatException {
       // 손상된 발주 데이터는 표시하지 않습니다.
@@ -426,7 +436,8 @@ class AppStore extends ChangeNotifier {
 
   Future<void> _saveRetailerApproval() async {
     final preferences = await SharedPreferences.getInstance();
-    await preferences.setString(_retailerApprovalKey, retailerApprovalStatus.name);
+    await preferences.setString(
+        _retailerApprovalKey, retailerApprovalStatus.name);
   }
 
   void signIn(UserRole role) {
@@ -567,8 +578,7 @@ class AppStore extends ChangeNotifier {
   Future<void> approveRetailer(RetailerProfile retailer) async {
     await Supabase.instance.client
         .from('profiles')
-        .update({'is_approved': true})
-        .eq('id', retailer.id);
+        .update({'is_approved': true}).eq('id', retailer.id);
     retailer.isApproved = true;
     notifyListeners();
   }
@@ -576,8 +586,7 @@ class AppStore extends ChangeNotifier {
   Future<void> reconsiderRetailer(RetailerProfile retailer) async {
     await Supabase.instance.client
         .from('profiles')
-        .update({'is_approved': false})
-        .eq('id', retailer.id);
+        .update({'is_approved': false}).eq('id', retailer.id);
     retailer.isApproved = false;
     notifyListeners();
   }
@@ -619,7 +628,10 @@ class AppStore extends ChangeNotifier {
   }
 
   Future<void> _loadProductsFromSupabase() async {
-    if (!AppConfig.hasSupabase || Supabase.instance.client.auth.currentUser == null) return;
+    if (!AppConfig.hasSupabase ||
+        Supabase.instance.client.auth.currentUser == null) {
+      return;
+    }
     try {
       final rows = await Supabase.instance.client
           .from('products')
@@ -657,9 +669,12 @@ class AppStore extends ChangeNotifier {
       cutName: cutName,
       subItems: subItems,
       notes: notes,
-      createdBy: AppConfig.hasSupabase ? Supabase.instance.client.auth.currentUser?.id : null,
+      createdBy: AppConfig.hasSupabase
+          ? Supabase.instance.client.auth.currentUser?.id
+          : null,
     );
-    if (AppConfig.hasSupabase && Supabase.instance.client.auth.currentUser != null) {
+    if (AppConfig.hasSupabase &&
+        Supabase.instance.client.auth.currentUser != null) {
       return Supabase.instance.client
           .from('products')
           .insert(product.toSupabase())
@@ -700,8 +715,7 @@ class AppStore extends ChangeNotifier {
       try {
         await Supabase.instance.client
             .from('products')
-            .update({'is_active': isActive})
-            .eq('id', product.id!);
+            .update({'is_active': isActive}).eq('id', product.id!);
       } on PostgrestException {
         product.isActive = !isActive;
         notifyListeners();
@@ -735,10 +749,13 @@ class AppStore extends ChangeNotifier {
   Future<bool> placeOrder() async {
     if (cart.isEmpty) return false;
     orderError = null;
-    final copiedLines = cart.map((line) => CartLine(line.product, quantity: line.quantity)).toList();
+    final copiedLines = cart
+        .map((line) => CartLine(line.product, quantity: line.quantity))
+        .toList();
     final number = 'MO-${DateTime.now().millisecondsSinceEpoch}';
     DemoOrder order;
-    if (AppConfig.hasSupabase && Supabase.instance.client.auth.currentUser != null) {
+    if (AppConfig.hasSupabase &&
+        Supabase.instance.client.auth.currentUser != null) {
       try {
         final user = Supabase.instance.client.auth.currentUser!;
         final inserted = await Supabase.instance.client
@@ -748,7 +765,8 @@ class AppStore extends ChangeNotifier {
               'retailer_id': user.id,
               'status': 'pending',
               'estimated_total': cartTotal,
-              'requested_delivery_date': requestedDeliveryDate.toIso8601String().split('T').first,
+              'requested_delivery_date':
+                  requestedDeliveryDate.toIso8601String().split('T').first,
               'memo': processingRequest.trim(),
               'settings_snapshot': settings.toJson(),
             })
@@ -820,8 +838,12 @@ class AppStore extends ChangeNotifier {
   }
 
   Future<void> acceptOrder(DemoOrder order) async {
-    order.stage = order.settings.confirmActualWeight ? OrderStage.weighing : OrderStage.preparing;
-    if (!order.settings.confirmActualWeight) order.finalTotal = order.estimatedTotal;
+    order.stage = order.settings.confirmActualWeight
+        ? OrderStage.weighing
+        : OrderStage.preparing;
+    if (!order.settings.confirmActualWeight) {
+      order.finalTotal = order.estimatedTotal;
+    }
     await _syncOrderStatus(order);
     _saveOrders();
     notifyListeners();
@@ -859,13 +881,15 @@ class AppStore extends ChangeNotifier {
     }).eq('id', order.id!);
   }
 
-  Future<void> updateSettings(void Function(OperationSettings value) update) async {
+  Future<void> updateSettings(
+      void Function(OperationSettings value) update) async {
     final previous = settings.snapshot();
     update(settings);
     if (!settings.confirmActualWeight) {
       settings.requireCustomerConfirmation = false;
     }
-    if (AppConfig.hasSupabase && Supabase.instance.client.auth.currentUser != null) {
+    if (AppConfig.hasSupabase &&
+        Supabase.instance.client.auth.currentUser != null) {
       try {
         await Supabase.instance.client
             .from('operation_settings')
@@ -987,21 +1011,28 @@ class LoginPage extends StatelessWidget {
                       color: const Color(0xFF8E2B25),
                       borderRadius: BorderRadius.circular(24),
                     ),
-                    child: const Icon(Icons.storefront, color: Colors.white, size: 42),
+                    child: const Icon(Icons.storefront,
+                        color: Colors.white, size: 42),
                   ),
                   const SizedBox(height: 24),
-                  const Text('마장오더', style: TextStyle(fontSize: 34, fontWeight: FontWeight.w900)),
+                  const Text('마장오더',
+                      style:
+                          TextStyle(fontSize: 34, fontWeight: FontWeight.w900)),
                   const SizedBox(height: 8),
-                  Text('거래처와 도매점을 연결하는 간편 발주 서비스', style: TextStyle(color: Colors.grey.shade700)),
+                  Text('거래처와 도매점을 연결하는 간편 발주 서비스',
+                      style: TextStyle(color: Colors.grey.shade700)),
                   const SizedBox(height: 34),
                   TextField(
                     onChanged: store.updateAuthEmail,
                     decoration: InputDecoration(
                       labelText: AppConfig.hasSupabase ? '이메일' : '휴대폰 번호',
-                      prefixIcon: Icon(AppConfig.hasSupabase ? Icons.email_outlined : Icons.phone_outlined),
+                      prefixIcon: Icon(AppConfig.hasSupabase
+                          ? Icons.email_outlined
+                          : Icons.phone_outlined),
                       filled: true,
                       fillColor: Colors.white,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16)),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -1013,7 +1044,8 @@ class LoginPage extends StatelessWidget {
                       prefixIcon: const Icon(Icons.lock_outline),
                       filled: true,
                       fillColor: Colors.white,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16)),
                     ),
                   ),
                   if (AppConfig.hasSupabase) ...[
@@ -1025,20 +1057,24 @@ class LoginPage extends StatelessWidget {
                         prefixIcon: const Icon(Icons.store_outlined),
                         filled: true,
                         fillColor: Colors.white,
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16)),
                       ),
                     ),
                   ],
                   const SizedBox(height: 20),
                   if (AppConfig.hasSupabase) ...[
                     FilledButton.icon(
-                      onPressed: store.authLoading ? null : store.signInWithSupabase,
+                      onPressed:
+                          store.authLoading ? null : store.signInWithSupabase,
                       icon: const Icon(Icons.login),
                       label: Text(store.authLoading ? '처리 중...' : '로그인'),
                     ),
                     const SizedBox(height: 10),
                     OutlinedButton.icon(
-                      onPressed: store.authLoading ? null : store.signUpRetailerWithSupabase,
+                      onPressed: store.authLoading
+                          ? null
+                          : store.signUpRetailerWithSupabase,
                       icon: const Icon(Icons.person_add_alt),
                       label: const Text('신규 소매점 가입'),
                     ),
@@ -1083,7 +1119,8 @@ class ApprovalWaitingPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = StoreScope.of(context);
-    final isRejected = store.retailerApprovalStatus == RetailerApprovalStatus.rejected;
+    final isRejected =
+        store.retailerApprovalStatus == RetailerApprovalStatus.rejected;
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -1095,14 +1132,17 @@ class ApprovalWaitingPage extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(
-                    isRejected ? Icons.block_outlined : Icons.hourglass_top_rounded,
+                    isRejected
+                        ? Icons.block_outlined
+                        : Icons.hourglass_top_rounded,
                     size: 72,
                     color: const Color(0xFF8E2B25),
                   ),
                   const SizedBox(height: 22),
                   Text(
                     isRejected ? '거래처 승인이 보류되었습니다' : '거래처 승인 대기 중',
-                    style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800),
+                    style: const TextStyle(
+                        fontSize: 26, fontWeight: FontWeight.w800),
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 10),
@@ -1113,7 +1153,9 @@ class ApprovalWaitingPage extends StatelessWidget {
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 28),
-                  TextButton(onPressed: store.signOut, child: const Text('다른 계정으로 로그인')),
+                  TextButton(
+                      onPressed: store.signOut,
+                      child: const Text('다른 계정으로 로그인')),
                 ],
               ),
             ),
@@ -1138,19 +1180,29 @@ class _MainShellState extends State<MainShell> {
   Widget build(BuildContext context) {
     final isAdmin = StoreScope.of(context).signedInRole == UserRole.admin;
     final pages = isAdmin
-        ? const [AdminDashboardPage(), OrdersPage(), AdminPage(), AccountPage()]
+        ? const [
+            AdminDashboardPage(),
+            OrdersPage(),
+            ProductManagementPage(),
+            AdminPage(),
+            AccountPage()
+          ]
         : const [ProductsPage(), CartPage(), OrdersPage(), AccountPage()];
     final destinations = isAdmin
         ? const [
             NavigationDestination(icon: Icon(Icons.dashboard), label: '현황'),
-            NavigationDestination(icon: Icon(Icons.receipt_long), label: '발주관리'),
-            NavigationDestination(icon: Icon(Icons.settings), label: '운영설정'),
-            NavigationDestination(icon: Icon(Icons.person), label: '내 정보'),
+            NavigationDestination(icon: Icon(Icons.receipt_long), label: '발주'),
+            NavigationDestination(
+                icon: Icon(Icons.inventory_2_outlined), label: '상품'),
+            NavigationDestination(icon: Icon(Icons.settings), label: '설정'),
+            NavigationDestination(icon: Icon(Icons.person), label: '내정보'),
           ]
         : const [
             NavigationDestination(icon: Icon(Icons.storefront), label: '상품'),
-            NavigationDestination(icon: Icon(Icons.shopping_cart), label: '장바구니'),
-            NavigationDestination(icon: Icon(Icons.receipt_long), label: '발주내역'),
+            NavigationDestination(
+                icon: Icon(Icons.shopping_cart), label: '장바구니'),
+            NavigationDestination(
+                icon: Icon(Icons.receipt_long), label: '발주내역'),
             NavigationDestination(icon: Icon(Icons.person), label: '내 정보'),
           ];
     return Scaffold(
@@ -1173,20 +1225,26 @@ class AdminDashboardPage extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
-        const Text('오늘의 발주 현황', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
+        const Text('오늘의 발주 현황',
+            style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
         const SizedBox(height: 6),
         Text('마장오더 도매점 관리자', style: TextStyle(color: Colors.grey.shade700)),
         const SizedBox(height: 20),
         Row(
           children: [
-            Expanded(child: _SummaryCard(label: '신규 발주', value: '${store.orders.length}', icon: Icons.notifications_active)),
+            Expanded(
+                child: _SummaryCard(
+                    label: '신규 발주',
+                    value: '${store.orders.length}',
+                    icon: Icons.notifications_active)),
             const SizedBox(width: 12),
             Expanded(
               child: _SummaryCard(
                 label: '승인 대기',
                 value: AppConfig.hasSupabase
                     ? '${store.retailers.where((retailer) => !retailer.isApproved).length}'
-                    : store.retailerApprovalStatus == RetailerApprovalStatus.pending
+                    : store.retailerApprovalStatus ==
+                            RetailerApprovalStatus.pending
                         ? '1'
                         : '0',
                 icon: Icons.store_mall_directory,
@@ -1197,13 +1255,18 @@ class AdminDashboardPage extends StatelessWidget {
         const SizedBox(height: 12),
         const Row(
           children: [
-            Expanded(child: _SummaryCard(label: '상품 준비', value: '0', icon: Icons.inventory_2)),
+            Expanded(
+                child: _SummaryCard(
+                    label: '상품 준비', value: '0', icon: Icons.inventory_2)),
             SizedBox(width: 12),
-            Expanded(child: _SummaryCard(label: '오늘 출고', value: '0', icon: Icons.local_shipping)),
+            Expanded(
+                child: _SummaryCard(
+                    label: '오늘 출고', value: '0', icon: Icons.local_shipping)),
           ],
         ),
         const SizedBox(height: 22),
-        const Text('빠른 관리', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+        const Text('빠른 관리',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
         const SizedBox(height: 12),
         if (AppConfig.hasSupabase && store.retailers.isEmpty)
           const Card(
@@ -1225,20 +1288,25 @@ class AdminDashboardPage extends StatelessWidget {
                         contentPadding: EdgeInsets.zero,
                         leading: const Icon(Icons.store_outlined),
                         title: Text(retailer.storeName),
-                        subtitle: Text(retailer.businessNumber?.isNotEmpty == true
-                            ? '사업자번호 ${retailer.businessNumber}'
-                            : '사업자번호 미등록'),
-                        trailing: Chip(label: Text(retailer.isApproved ? '승인 완료' : '승인 대기')),
+                        subtitle: Text(
+                            retailer.businessNumber?.isNotEmpty == true
+                                ? '사업자번호 ${retailer.businessNumber}'
+                                : '사업자번호 미등록'),
+                        trailing: Chip(
+                            label:
+                                Text(retailer.isApproved ? '승인 완료' : '승인 대기')),
                       ),
                       SizedBox(
                         width: double.infinity,
                         child: retailer.isApproved
                             ? OutlinedButton(
-                                onPressed: () => store.reconsiderRetailer(retailer),
+                                onPressed: () =>
+                                    store.reconsiderRetailer(retailer),
                                 child: const Text('승인 취소'),
                               )
                             : FilledButton(
-                                onPressed: () => store.approveRetailer(retailer),
+                                onPressed: () =>
+                                    store.approveRetailer(retailer),
                                 child: const Text('거래처 승인'),
                               ),
                       ),
@@ -1266,7 +1334,8 @@ class AdminDashboardPage extends StatelessWidget {
 }
 
 class _SummaryCard extends StatelessWidget {
-  const _SummaryCard({required this.label, required this.value, required this.icon});
+  const _SummaryCard(
+      {required this.label, required this.value, required this.icon});
   final String label;
   final String value;
   final IconData icon;
@@ -1280,7 +1349,9 @@ class _SummaryCard extends StatelessWidget {
             children: [
               Icon(icon, color: const Color(0xFF8E2B25)),
               const SizedBox(height: 16),
-              Text(value, style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900)),
+              Text(value,
+                  style: const TextStyle(
+                      fontSize: 28, fontWeight: FontWeight.w900)),
               Text(label),
             ],
           ),
@@ -1289,10 +1360,14 @@ class _SummaryCard extends StatelessWidget {
 }
 
 final initialProducts = [
-  Product('한우 등심 1++', '국내산 · 냉장 · 구이용', 'kg', 89500, Icons.set_meal, animalType: '소', cutName: '등심'),
-  Product('한우 국거리', '국내산 · 냉장 · 정육', 'kg', 36500, Icons.restaurant, animalType: '소', cutName: '국거리'),
-  Product('한돈 삼겹살', '국내산 · 냉장 · 원육', 'kg', 21800, Icons.lunch_dining, animalType: '돼지', cutName: '삼겹살'),
-  Product('미국산 갈비살', '미국산 · 냉장 · 초이스', 'kg', 27900, Icons.kebab_dining, animalType: '소', cutName: '갈비'),
+  Product('한우 등심 1++', '국내산 · 냉장 · 구이용', 'kg', 89500, Icons.set_meal,
+      animalType: '소', cutName: '등심'),
+  Product('한우 국거리', '국내산 · 냉장 · 정육', 'kg', 36500, Icons.restaurant,
+      animalType: '소', cutName: '국거리'),
+  Product('한돈 삼겹살', '국내산 · 냉장 · 원육', 'kg', 21800, Icons.lunch_dining,
+      animalType: '돼지', cutName: '삼겹살'),
+  Product('미국산 갈비살', '미국산 · 냉장 · 초이스', 'kg', 27900, Icons.kebab_dining,
+      animalType: '소', cutName: '갈비'),
 ];
 
 class ProductsPage extends StatefulWidget {
@@ -1311,9 +1386,16 @@ class _ProductsPageState extends State<ProductsPage> {
     final store = StoreScope.of(context);
     final normalizedQuery = query.trim().toLowerCase();
     final filteredProducts = store.products.where((product) {
-      if (!product.isActive) return false;
-      if (selectedAnimalType != '전체' && product.animalType != selectedAnimalType) return false;
-      if (normalizedQuery.isEmpty) return true;
+      if (!product.isActive) {
+        return false;
+      }
+      if (selectedAnimalType != '전체' &&
+          product.animalType != selectedAnimalType) {
+        return false;
+      }
+      if (normalizedQuery.isEmpty) {
+        return true;
+      }
       return product.name.toLowerCase().contains(normalizedQuery) ||
           product.cutName.toLowerCase().contains(normalizedQuery) ||
           product.detail.toLowerCase().contains(normalizedQuery);
@@ -1321,7 +1403,8 @@ class _ProductsPageState extends State<ProductsPage> {
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
-        const Text('마장오더', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
+        const Text('마장오더',
+            style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
         const SizedBox(height: 6),
         Text('좋은 고기를 빠르게 발주하세요', style: TextStyle(color: Colors.grey.shade700)),
         const SizedBox(height: 20),
@@ -1347,7 +1430,8 @@ class _ProductsPageState extends State<ProductsPage> {
                 ChoiceChip(
                   label: Text(animalType),
                   selected: selectedAnimalType == animalType,
-                  onSelected: (_) => setState(() => selectedAnimalType = animalType),
+                  onSelected: (_) =>
+                      setState(() => selectedAnimalType = animalType),
                 ),
                 const SizedBox(width: 8),
               ],
@@ -1355,7 +1439,8 @@ class _ProductsPageState extends State<ProductsPage> {
           ),
         ),
         const SizedBox(height: 22),
-        const Text('축종별 상품', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+        const Text('축종별 상품',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
         const SizedBox(height: 12),
         if (filteredProducts.isEmpty)
           const Card(
@@ -1365,7 +1450,8 @@ class _ProductsPageState extends State<ProductsPage> {
             ),
           ),
         for (final animalType in ['소', '돼지', '닭', '양', '기타'])
-          if (filteredProducts.any((product) => product.animalType == animalType)) ...[
+          if (filteredProducts
+              .any((product) => product.animalType == animalType)) ...[
             Padding(
               padding: const EdgeInsets.only(top: 8, bottom: 10),
               child: Row(
@@ -1373,79 +1459,104 @@ class _ProductsPageState extends State<ProductsPage> {
                   CircleAvatar(
                     radius: 16,
                     backgroundColor: const Color(0xFF8E2B25),
-                    child: Text(animalType.substring(0, 1), style: const TextStyle(color: Colors.white)),
+                    child: Text(animalType.substring(0, 1),
+                        style: const TextStyle(color: Colors.white)),
                   ),
                   const SizedBox(width: 9),
-                  Text(animalType, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                  Text(animalType,
+                      style: const TextStyle(
+                          fontSize: 18, fontWeight: FontWeight.w800)),
                 ],
               ),
             ),
-            ...filteredProducts.where((product) => product.animalType == animalType).map(
-          (product) => Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 64,
-                      height: 64,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF3E2DE),
-                        borderRadius: BorderRadius.circular(15),
-                      ),
-                      child: Icon(product.icon, color: const Color(0xFF8E2B25), size: 30),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(product.name, style: const TextStyle(fontWeight: FontWeight.w700)),
-                          const SizedBox(height: 4),
-                          if (product.cutName.isNotEmpty)
-                            Text('${product.animalType} 〉 ${product.cutName}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
-                          if (product.cutName.isNotEmpty) const SizedBox(height: 3),
-                          if (product.subItems.isNotEmpty) ...[
-                            Wrap(
-                              spacing: 5,
-                              runSpacing: 4,
-                              children: [
-                                for (final subItem in product.subItems)
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFFF3E2DE),
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: Text(subItem, style: const TextStyle(fontSize: 11)),
-                                  ),
-                              ],
+            ...filteredProducts
+                .where((product) => product.animalType == animalType)
+                .map(
+                  (product) => Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 64,
+                              height: 64,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF3E2DE),
+                                borderRadius: BorderRadius.circular(15),
+                              ),
+                              child: Icon(product.icon,
+                                  color: const Color(0xFF8E2B25), size: 30),
                             ),
-                            const SizedBox(height: 5),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(product.name,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w700)),
+                                  const SizedBox(height: 4),
+                                  if (product.cutName.isNotEmpty)
+                                    Text(
+                                        '${product.animalType} 〉 ${product.cutName}',
+                                        style: const TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w700)),
+                                  if (product.cutName.isNotEmpty)
+                                    const SizedBox(height: 3),
+                                  if (product.subItems.isNotEmpty) ...[
+                                    Wrap(
+                                      spacing: 5,
+                                      runSpacing: 4,
+                                      children: [
+                                        for (final subItem in product.subItems)
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 7, vertical: 3),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFFF3E2DE),
+                                              borderRadius:
+                                                  BorderRadius.circular(8),
+                                            ),
+                                            child: Text(subItem,
+                                                style: const TextStyle(
+                                                    fontSize: 11)),
+                                          ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 5),
+                                  ],
+                                  Text(product.detail,
+                                      style: TextStyle(
+                                          color: Colors.grey.shade600,
+                                          fontSize: 12)),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                      '${money(product.price)}원 / ${product.unit}',
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w700)),
+                                ],
+                              ),
+                            ),
+                            IconButton.filled(
+                              onPressed: () {
+                                store.add(product);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                      content: Text(
+                                          '${product.name}을 장바구니에 담았습니다.')),
+                                );
+                              },
+                              icon: const Icon(Icons.add),
+                            ),
                           ],
-                          Text(product.detail, style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
-                          const SizedBox(height: 8),
-                          Text('${money(product.price)}원 / ${product.unit}', style: const TextStyle(fontWeight: FontWeight.w700)),
-                        ],
+                        ),
                       ),
                     ),
-                    IconButton.filled(
-                      onPressed: () {
-                        store.add(product);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('${product.name}을 장바구니에 담았습니다.')),
-                        );
-                      },
-                      icon: const Icon(Icons.add),
-                    ),
-                  ],
+                  ),
                 ),
-              ),
-            ),
-          ),
-        ),
           ],
       ],
     );
@@ -1474,7 +1585,8 @@ class CartPage extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('장바구니', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
+          const Text('장바구니',
+              style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
           const SizedBox(height: 18),
           Expanded(
             child: store.cart.isEmpty
@@ -1486,14 +1598,24 @@ class CartPage extends StatelessWidget {
                       final line = store.cart[index];
                       return Card(
                         child: ListTile(
-                          title: Text(line.product.name, style: const TextStyle(fontWeight: FontWeight.w700)),
-                          subtitle: Text('${money(line.product.price * line.quantity)}원'),
+                          title: Text(line.product.name,
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w700)),
+                          subtitle: Text(
+                              '${money(line.product.price * line.quantity)}원'),
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              IconButton(onPressed: () => store.changeQuantity(line, -1), icon: const Icon(Icons.remove_circle_outline)),
+                              IconButton(
+                                  onPressed: () =>
+                                      store.changeQuantity(line, -1),
+                                  icon:
+                                      const Icon(Icons.remove_circle_outline)),
                               Text('${line.quantity} ${line.product.unit}'),
-                              IconButton(onPressed: () => store.changeQuantity(line, 1), icon: const Icon(Icons.add_circle_outline)),
+                              IconButton(
+                                  onPressed: () =>
+                                      store.changeQuantity(line, 1),
+                                  icon: const Icon(Icons.add_circle_outline)),
                             ],
                           ),
                         ),
@@ -1528,13 +1650,18 @@ class CartPage extends StatelessWidget {
                   const SizedBox(height: 16),
                   const Divider(),
                   const SizedBox(height: 8),
-                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                    const Text('예상 합계'),
-                    Text('${money(store.cartTotal)}원', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
-                  ]),
+                  Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('예상 합계'),
+                        Text('${money(store.cartTotal)}원',
+                            style: const TextStyle(
+                                fontSize: 20, fontWeight: FontWeight.w800)),
+                      ]),
                   if (store.settings.confirmActualWeight) ...[
                     const SizedBox(height: 8),
-                    const Text('실중량 반영 후 도매점에서 최종금액을 확정합니다.', style: TextStyle(fontSize: 12)),
+                    const Text('실중량 반영 후 도매점에서 최종금액을 확정합니다.',
+                        style: TextStyle(fontSize: 12)),
                   ],
                   const SizedBox(height: 14),
                   SizedBox(
@@ -1547,7 +1674,9 @@ class CartPage extends StatelessWidget {
                               if (!context.mounted) return;
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
-                                  content: Text(success ? '발주가 접수되었습니다.' : '발주 실패: ${store.orderError ?? '다시 시도해 주세요.'}'),
+                                  content: Text(success
+                                      ? '발주가 접수되었습니다.'
+                                      : '발주 실패: ${store.orderError ?? '다시 시도해 주세요.'}'),
                                 ),
                               );
                             },
@@ -1572,7 +1701,8 @@ class OrdersPage extends StatelessWidget {
     AppStore store,
     DemoOrder order,
   ) async {
-    final controller = TextEditingController(text: order.estimatedTotal.toString());
+    final controller =
+        TextEditingController(text: order.estimatedTotal.toString());
     final amount = await showDialog<int>(
       context: context,
       builder: (context) => AlertDialog(
@@ -1581,10 +1711,12 @@ class OrdersPage extends StatelessWidget {
           controller: controller,
           keyboardType: TextInputType.number,
           autofocus: true,
-          decoration: const InputDecoration(labelText: '실중량 반영 최종금액', suffixText: '원'),
+          decoration:
+              const InputDecoration(labelText: '실중량 반영 최종금액', suffixText: '원'),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('취소')),
+          TextButton(
+              onPressed: () => Navigator.pop(context), child: const Text('취소')),
           FilledButton(
             onPressed: () {
               final value = int.tryParse(controller.text.replaceAll(',', ''));
@@ -1606,14 +1738,17 @@ class OrdersPage extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
-        Text(isAdmin ? '발주관리' : '발주내역', style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
+        Text(isAdmin ? '발주관리' : '발주내역',
+            style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
         if (isAdmin) ...[
           const SizedBox(height: 6),
-          Text('접수부터 최종금액 확정까지 처리하세요.', style: TextStyle(color: Colors.grey.shade700)),
+          Text('접수부터 최종금액 확정까지 처리하세요.',
+              style: TextStyle(color: Colors.grey.shade700)),
         ],
         const SizedBox(height: 18),
         if (store.orders.isEmpty)
-          const SizedBox(height: 220, child: Center(child: Text('아직 발주내역이 없습니다.'))),
+          const SizedBox(
+              height: 220, child: Center(child: Text('아직 발주내역이 없습니다.'))),
         ...store.orders.map(
           (order) => Padding(
             padding: const EdgeInsets.only(bottom: 12),
@@ -1623,11 +1758,18 @@ class OrdersPage extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                      Text(order.number, style: const TextStyle(fontWeight: FontWeight.w800)),
-                      Chip(label: Text(orderStageLabel(order.stage))),
-                    ]),
-                    Text(order.lines.map((line) => '${line.product.name} ${line.quantity}${line.product.unit}').join(' · ')),
+                    Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(order.number,
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w800)),
+                          Chip(label: Text(orderStageLabel(order.stage))),
+                        ]),
+                    Text(order.lines
+                        .map((line) =>
+                            '${line.product.name} ${line.quantity}${line.product.unit}')
+                        .join(' · ')),
                     const SizedBox(height: 10),
                     Text('예상금액 ${money(order.estimatedTotal)}원'),
                     const SizedBox(height: 6),
@@ -1651,14 +1793,21 @@ class OrdersPage extends StatelessWidget {
                       ),
                     ],
                     if (order.finalTotal != null)
-                      Text('최종금액 ${money(order.finalTotal!)}원', style: const TextStyle(fontWeight: FontWeight.w800)),
+                      Text('최종금액 ${money(order.finalTotal!)}원',
+                          style: const TextStyle(fontWeight: FontWeight.w800)),
                     if (isAdmin && order.stage == OrderStage.pending) ...[
                       const SizedBox(height: 14),
                       Row(
                         children: [
-                          Expanded(child: OutlinedButton(onPressed: () => store.rejectOrder(order), child: const Text('거절'))),
+                          Expanded(
+                              child: OutlinedButton(
+                                  onPressed: () => store.rejectOrder(order),
+                                  child: const Text('거절'))),
                           const SizedBox(width: 8),
-                          Expanded(child: FilledButton(onPressed: () => store.acceptOrder(order), child: const Text('발주 접수'))),
+                          Expanded(
+                              child: FilledButton(
+                                  onPressed: () => store.acceptOrder(order),
+                                  child: const Text('발주 접수'))),
                         ],
                       ),
                     ],
@@ -1667,13 +1816,15 @@ class OrdersPage extends StatelessWidget {
                       SizedBox(
                         width: double.infinity,
                         child: FilledButton.icon(
-                          onPressed: () => _showFinalAmountDialog(context, store, order),
+                          onPressed: () =>
+                              _showFinalAmountDialog(context, store, order),
                           icon: const Icon(Icons.scale_outlined),
                           label: const Text('실중량·최종금액 입력'),
                         ),
                       ),
                     ],
-                    if (!isAdmin && order.stage == OrderStage.customerConfirmation) ...[
+                    if (!isAdmin &&
+                        order.stage == OrderStage.customerConfirmation) ...[
                       const SizedBox(height: 14),
                       SizedBox(
                         width: double.infinity,
@@ -1718,117 +1869,271 @@ OrderStage orderStageFromDatabase(String status) => switch (status) {
       _ => OrderStage.pending,
     };
 
-class AdminPage extends StatelessWidget {
-  const AdminPage({super.key});
+Future<void> showAddProductDialog(BuildContext context, AppStore store) async {
+  final nameController = TextEditingController();
+  final subItemsController = TextEditingController();
+  final detailController = TextEditingController(text: '국내산 · 냉장');
+  final priceController = TextEditingController();
+  final notesController = TextEditingController();
+  var unit = 'kg';
+  var animalType = '소';
+  final shouldSave = await showDialog<bool>(
+    context: context,
+    builder: (context) => StatefulBuilder(
+      builder: (context, setDialogState) => AlertDialog(
+        title: const Text('새 상품 등록'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DropdownButtonFormField<String>(
+                initialValue: animalType,
+                decoration: const InputDecoration(labelText: '1. 구분'),
+                items: const [
+                  DropdownMenuItem(value: '소', child: Text('소')),
+                  DropdownMenuItem(value: '돼지', child: Text('돼지')),
+                  DropdownMenuItem(value: '닭', child: Text('닭')),
+                  DropdownMenuItem(value: '양', child: Text('양')),
+                  DropdownMenuItem(value: '기타', child: Text('기타')),
+                ],
+                onChanged: (value) =>
+                    setDialogState(() => animalType = value ?? animalType),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: nameController,
+                autofocus: true,
+                decoration: const InputDecoration(
+                    labelText: '2. 품목명', hintText: '예: 설도, 차돌양지, 갈비'),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: subItemsController,
+                minLines: 2,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: '3. 세부품목',
+                  hintText: '예: 도가니, 보섭살, 삼각살2',
+                  helperText: '여러 개는 쉼표(,)로 구분하세요.',
+                  alignLabelWithHint: true,
+                ),
+              ),
+              const SizedBox(height: 10),
+              DropdownButtonFormField<String>(
+                initialValue: unit,
+                decoration: const InputDecoration(labelText: '4. 단위'),
+                items: const [
+                  DropdownMenuItem(value: 'kg', child: Text('kg')),
+                  DropdownMenuItem(value: '팩', child: Text('팩')),
+                  DropdownMenuItem(value: '박스', child: Text('박스')),
+                ],
+                onChanged: (value) =>
+                    setDialogState(() => unit = value ?? unit),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: priceController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                    labelText: '5. 기준단가', suffixText: '원'),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                  controller: detailController,
+                  decoration: const InputDecoration(labelText: '원산지·보관·등급')),
+              const SizedBox(height: 10),
+              TextField(
+                controller: notesController,
+                minLines: 2,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                    labelText: '비고', hintText: '필요한 안내사항을 입력하세요.'),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('취소')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('등록')),
+        ],
+      ),
+    ),
+  );
+  final price = int.tryParse(priceController.text.replaceAll(',', ''));
+  if (shouldSave == true &&
+      nameController.text.trim().isNotEmpty &&
+      price != null &&
+      price > 0) {
+    final subItems = subItemsController.text
+        .split(',')
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .toSet()
+        .toList();
+    store.addProduct(
+      name: nameController.text.trim(),
+      animalType: animalType,
+      cutName: nameController.text.trim(),
+      subItems: subItems,
+      notes: notesController.text.trim(),
+      detail: detailController.text.trim(),
+      unit: unit,
+      price: price,
+    );
+  }
+  nameController.dispose();
+  subItemsController.dispose();
+  detailController.dispose();
+  priceController.dispose();
+  notesController.dispose();
+}
 
-  Future<void> _showAddProductDialog(BuildContext context, AppStore store) async {
-    final nameController = TextEditingController();
-    final subItemsController = TextEditingController();
-    final detailController = TextEditingController(text: '국내산 · 냉장');
-    final priceController = TextEditingController();
-    final notesController = TextEditingController();
-    var unit = 'kg';
-    var animalType = '소';
-    final shouldSave = await showDialog<bool>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('새 상품 등록'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButtonFormField<String>(
-                  initialValue: animalType,
-                  decoration: const InputDecoration(labelText: '1. 구분'),
-                  items: const [
-                    DropdownMenuItem(value: '소', child: Text('소')),
-                    DropdownMenuItem(value: '돼지', child: Text('돼지')),
-                    DropdownMenuItem(value: '닭', child: Text('닭')),
-                    DropdownMenuItem(value: '양', child: Text('양')),
-                    DropdownMenuItem(value: '기타', child: Text('기타')),
-                  ],
-                  onChanged: (value) => setDialogState(() => animalType = value ?? animalType),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: nameController,
-                  autofocus: true,
-                  decoration: const InputDecoration(labelText: '2. 품목명', hintText: '예: 설도, 차돌양지, 갈비'),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: subItemsController,
-                  minLines: 2,
-                  maxLines: 3,
-                  decoration: const InputDecoration(
-                    labelText: '3. 세부품목',
-                    hintText: '예: 도가니, 보섭살, 삼각살2',
-                    helperText: '여러 개는 쉼표(,)로 구분하세요.',
-                    alignLabelWithHint: true,
+class ProductManagementPage extends StatefulWidget {
+  const ProductManagementPage({super.key});
+
+  @override
+  State<ProductManagementPage> createState() => _ProductManagementPageState();
+}
+
+class _ProductManagementPageState extends State<ProductManagementPage> {
+  final searchController = TextEditingController();
+  String query = '';
+  String animalType = '전체';
+
+  @override
+  void dispose() {
+    searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final store = StoreScope.of(context);
+    final normalizedQuery = query.trim().toLowerCase();
+    final products = store.products.where((product) {
+      final matchesType =
+          animalType == '전체' || product.animalType == animalType;
+      final searchableText = [
+        product.animalType,
+        product.name,
+        product.cutName,
+        product.detail,
+        product.notes,
+        ...product.subItems,
+      ].join(' ').toLowerCase();
+      return matchesType &&
+          (normalizedQuery.isEmpty || searchableText.contains(normalizedQuery));
+    }).toList();
+    final activeCount =
+        store.products.where((product) => product.isActive).length;
+
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        Row(
+          children: [
+            const Expanded(
+                child: Text('상품 관리',
+                    style:
+                        TextStyle(fontSize: 28, fontWeight: FontWeight.w800))),
+            FilledButton.icon(
+              onPressed: () => showAddProductDialog(context, store),
+              icon: const Icon(Icons.add),
+              label: const Text('상품 등록'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text('전체 ${store.products.length}개 · 판매중 $activeCount개',
+            style: TextStyle(color: Colors.grey.shade700)),
+        const SizedBox(height: 16),
+        TextField(
+          controller: searchController,
+          onChanged: (value) => setState(() => query = value),
+          decoration: InputDecoration(
+            hintText: '품목명, 세부품목, 비고 검색',
+            prefixIcon: const Icon(Icons.search),
+            suffixIcon: query.isEmpty
+                ? null
+                : IconButton(
+                    tooltip: '검색어 지우기',
+                    onPressed: () {
+                      searchController.clear();
+                      setState(() => query = '');
+                    },
+                    icon: const Icon(Icons.close),
                   ),
+            filled: true,
+            fillColor: Colors.white,
+            border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: BorderSide.none),
+          ),
+        ),
+        const SizedBox(height: 12),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              for (final type in ['전체', '소', '돼지', '닭', '양', '기타']) ...[
+                ChoiceChip(
+                  label: Text(type),
+                  selected: animalType == type,
+                  onSelected: (_) => setState(() => animalType = type),
                 ),
-                const SizedBox(height: 10),
-                DropdownButtonFormField<String>(
-                  initialValue: unit,
-                  decoration: const InputDecoration(labelText: '4. 단위'),
-                  items: const [
-                    DropdownMenuItem(value: 'kg', child: Text('kg')),
-                    DropdownMenuItem(value: '팩', child: Text('팩')),
-                    DropdownMenuItem(value: '박스', child: Text('박스')),
-                  ],
-                  onChanged: (value) => setDialogState(() => unit = value ?? unit),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: priceController,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: '5. 기준단가', suffixText: '원'),
-                ),
-                const SizedBox(height: 10),
-                TextField(controller: detailController, decoration: const InputDecoration(labelText: '원산지·보관·등급')),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: notesController,
-                  minLines: 2,
-                  maxLines: 3,
-                  decoration: const InputDecoration(labelText: '비고', hintText: '필요한 안내사항을 입력하세요.'),
-                ),
+                const SizedBox(width: 8),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        if (products.isEmpty)
+          const Card(
+            child: Padding(
+              padding: EdgeInsets.all(28),
+              child: Center(child: Text('검색 조건에 맞는 상품이 없습니다.')),
+            ),
+          )
+        else
+          Card(
+            child: Column(
+              children: [
+                for (var index = 0; index < products.length; index++) ...[
+                  SwitchListTile(
+                    title: Text(products[index].name,
+                        style: const TextStyle(fontWeight: FontWeight.w700)),
+                    subtitle: Text(
+                      [
+                        '${products[index].animalType} 〉 ${products[index].name}',
+                        if (products[index].subItems.isNotEmpty)
+                          '세부: ${products[index].subItems.join(', ')}',
+                        '${money(products[index].price)}원 / ${products[index].unit}',
+                        if (products[index].notes.isNotEmpty)
+                          '비고: ${products[index].notes}',
+                        if (products[index].createdAt != null)
+                          '등록: ${dateTimeText(products[index].createdAt!)}',
+                      ].join('\n'),
+                    ),
+                    value: products[index].isActive,
+                    onChanged: (value) =>
+                        store.toggleProduct(products[index], value),
+                  ),
+                  if (index < products.length - 1) const Divider(height: 1),
+                ],
               ],
             ),
           ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('취소')),
-            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('등록')),
-          ],
-        ),
-      ),
+      ],
     );
-    final price = int.tryParse(priceController.text.replaceAll(',', ''));
-    if (shouldSave == true && nameController.text.trim().isNotEmpty && price != null && price > 0) {
-      final subItems = subItemsController.text
-          .split(',')
-          .map((value) => value.trim())
-          .where((value) => value.isNotEmpty)
-          .toSet()
-          .toList();
-      store.addProduct(
-        name: nameController.text.trim(),
-        animalType: animalType,
-        cutName: nameController.text.trim(),
-        subItems: subItems,
-        notes: notesController.text.trim(),
-        detail: detailController.text.trim(),
-        unit: unit,
-        price: price,
-      );
-    }
-    nameController.dispose();
-    subItemsController.dispose();
-    detailController.dispose();
-    priceController.dispose();
-    notesController.dispose();
   }
+}
+
+class AdminPage extends StatelessWidget {
+  const AdminPage({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -1837,25 +2142,33 @@ class AdminPage extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
-        const Text('관리자 설정', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
+        const Text('관리자 설정',
+            style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
         const SizedBox(height: 6),
-        Text('도매점 운영 방식에 맞게 기능을 선택하세요.', style: TextStyle(color: Colors.grey.shade700)),
+        Text('도매점 운영 방식에 맞게 기능을 선택하세요.',
+            style: TextStyle(color: Colors.grey.shade700)),
         const SizedBox(height: 18),
         Card(
           child: Column(
             children: [
               SwitchListTile(
                 title: const Text('거래처 가입 승인'),
-                subtitle: Text(settings.requireStoreApproval ? '승인된 소매점만 발주할 수 있습니다.' : '가입 즉시 발주할 수 있습니다.'),
+                subtitle: Text(settings.requireStoreApproval
+                    ? '승인된 소매점만 발주할 수 있습니다.'
+                    : '가입 즉시 발주할 수 있습니다.'),
                 value: settings.requireStoreApproval,
-                onChanged: (value) => store.updateSettings((s) => s.requireStoreApproval = value),
+                onChanged: (value) =>
+                    store.updateSettings((s) => s.requireStoreApproval = value),
               ),
               const Divider(height: 1),
               SwitchListTile(
                 title: const Text('실중량 및 최종금액 확정'),
-                subtitle: Text(settings.confirmActualWeight ? '예상금액으로 접수 후 최종금액을 확정합니다.' : '주문 시 금액이 바로 확정됩니다.'),
+                subtitle: Text(settings.confirmActualWeight
+                    ? '예상금액으로 접수 후 최종금액을 확정합니다.'
+                    : '주문 시 금액이 바로 확정됩니다.'),
                 value: settings.confirmActualWeight,
-                onChanged: (value) => store.updateSettings((s) => s.confirmActualWeight = value),
+                onChanged: (value) =>
+                    store.updateSettings((s) => s.confirmActualWeight = value),
               ),
               const Divider(height: 1),
               SwitchListTile(
@@ -1863,59 +2176,24 @@ class AdminPage extends StatelessWidget {
                 subtitle: const Text('소매점 확인 후 상품 준비를 시작합니다.'),
                 value: settings.requireCustomerConfirmation,
                 onChanged: settings.confirmActualWeight
-                    ? (value) => store.updateSettings((s) => s.requireCustomerConfirmation = value)
+                    ? (value) => store.updateSettings(
+                        (s) => s.requireCustomerConfirmation = value)
                     : null,
               ),
               const Divider(height: 1),
               SwitchListTile(
                 title: const Text('거래처별 단가'),
                 value: settings.useStoreSpecificPricing,
-                onChanged: (value) => store.updateSettings((s) => s.useStoreSpecificPricing = value),
+                onChanged: (value) => store
+                    .updateSettings((s) => s.useStoreSpecificPricing = value),
               ),
               const Divider(height: 1),
               SwitchListTile(
                 title: const Text('재고 부족 주문 허용'),
                 value: settings.allowBackorder,
-                onChanged: (value) => store.updateSettings((s) => s.allowBackorder = value),
+                onChanged: (value) =>
+                    store.updateSettings((s) => s.allowBackorder = value),
               ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 14),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Text('상품 관리', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
-            FilledButton.icon(
-              onPressed: () => _showAddProductDialog(context, store),
-              icon: const Icon(Icons.add),
-              label: const Text('상품 등록'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        Card(
-          child: Column(
-            children: [
-              for (var index = 0; index < store.products.length; index++) ...[
-                SwitchListTile(
-                  title: Text(store.products[index].name),
-                  subtitle: Text(
-                    [
-                      '${store.products[index].animalType} 〉 ${store.products[index].name}',
-                      if (store.products[index].subItems.isNotEmpty)
-                        '세부: ${store.products[index].subItems.join(', ')}',
-                      '${money(store.products[index].price)}원 / ${store.products[index].unit}',
-                      if (store.products[index].notes.isNotEmpty) '비고: ${store.products[index].notes}',
-                      if (store.products[index].createdAt != null)
-                        '등록: ${dateTimeText(store.products[index].createdAt!)}',
-                    ].join('\n'),
-                  ),
-                  value: store.products[index].isActive,
-                  onChanged: (value) => store.toggleProduct(store.products[index], value),
-                ),
-                if (index < store.products.length - 1) const Divider(height: 1),
-              ],
             ],
           ),
         ),
@@ -1948,7 +2226,8 @@ class AccountPage extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
-        const Text('내 정보', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
+        const Text('내 정보',
+            style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
         const SizedBox(height: 18),
         Card(
           child: Padding(
@@ -1957,13 +2236,15 @@ class AccountPage extends StatelessWidget {
               children: [
                 CircleAvatar(
                   radius: 28,
-                  child: Icon(isAdmin ? Icons.admin_panel_settings : Icons.store),
+                  child:
+                      Icon(isAdmin ? Icons.admin_panel_settings : Icons.store),
                 ),
                 const SizedBox(width: 14),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(isAdmin ? '마장오더 도매점' : '우리정육점', style: const TextStyle(fontWeight: FontWeight.w800)),
+                    Text(isAdmin ? '마장오더 도매점' : '우리정육점',
+                        style: const TextStyle(fontWeight: FontWeight.w800)),
                     Text(isAdmin ? '관리자 계정' : '승인된 거래처'),
                   ],
                 ),
@@ -1975,16 +2256,28 @@ class AccountPage extends StatelessWidget {
         const Card(
           child: Column(
             children: [
-              ListTile(leading: Icon(Icons.business_outlined), title: Text('사업자 정보'), trailing: Icon(Icons.chevron_right)),
+              ListTile(
+                  leading: Icon(Icons.business_outlined),
+                  title: Text('사업자 정보'),
+                  trailing: Icon(Icons.chevron_right)),
               Divider(height: 1),
-              ListTile(leading: Icon(Icons.location_on_outlined), title: Text('배송지 관리'), trailing: Icon(Icons.chevron_right)),
+              ListTile(
+                  leading: Icon(Icons.location_on_outlined),
+                  title: Text('배송지 관리'),
+                  trailing: Icon(Icons.chevron_right)),
               Divider(height: 1),
-              ListTile(leading: Icon(Icons.notifications_none), title: Text('알림 설정'), trailing: Icon(Icons.chevron_right)),
+              ListTile(
+                  leading: Icon(Icons.notifications_none),
+                  title: Text('알림 설정'),
+                  trailing: Icon(Icons.chevron_right)),
             ],
           ),
         ),
         const SizedBox(height: 20),
-        OutlinedButton.icon(onPressed: store.signOut, icon: const Icon(Icons.logout), label: const Text('로그아웃')),
+        OutlinedButton.icon(
+            onPressed: store.signOut,
+            icon: const Icon(Icons.logout),
+            label: const Text('로그아웃')),
       ],
     );
   }
