@@ -1974,15 +1974,51 @@ Future<void> showAddProductDialog(BuildContext context, AppStore store) async {
         .where((value) => value.isNotEmpty)
         .toSet()
         .toList();
-    store.addProduct(
-      name: nameController.text.trim(),
-      animalType: animalType,
-      cutName: nameController.text.trim(),
-      subItems: subItems,
-      notes: notesController.text.trim(),
-      detail: detailController.text.trim(),
-      unit: unit,
-      price: price,
+    try {
+      await store.addProduct(
+        name: nameController.text.trim(),
+        animalType: animalType,
+        cutName: nameController.text.trim(),
+        subItems: subItems,
+        notes: notesController.text.trim(),
+        detail: detailController.text.trim(),
+        unit: unit,
+        price: price,
+      );
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${nameController.text.trim()} 상품이 등록됐습니다.')),
+        );
+      }
+    } on PostgrestException catch (error) {
+      if (context.mounted) {
+        final needsMigration = error.message.contains('notes') ||
+            error.message.contains('created_by') ||
+            error.message.contains('product_sub_items');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              needsMigration
+                  ? '상품 등록 실패: Supabase에서 0005 SQL을 먼저 실행해 주세요.'
+                  : '상품 등록 실패: ${error.message}',
+            ),
+            backgroundColor: Colors.red.shade700,
+          ),
+        );
+      }
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('상품 등록 실패: $error'),
+            backgroundColor: Colors.red.shade700,
+          ),
+        );
+      }
+    }
+  } else if (shouldSave == true && context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('품목명과 0원보다 큰 기준단가를 입력해 주세요.')),
     );
   }
   nameController.dispose();

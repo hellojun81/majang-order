@@ -36,6 +36,8 @@ create trigger product_sub_items_set_updated_at
 
 alter table public.product_sub_items enable row level security;
 
+drop policy if exists "authenticated users can read active product sub items"
+on public.product_sub_items;
 create policy "authenticated users can read active product sub items"
 on public.product_sub_items for select to authenticated
 using (
@@ -46,9 +48,14 @@ using (
   )
 );
 
+drop policy if exists "admins can manage product sub items"
+on public.product_sub_items;
 create policy "admins can manage product sub items"
 on public.product_sub_items for all to authenticated
 using (public.is_admin()) with check (public.is_admin());
+
+grant select, insert, update, delete on public.product_sub_items to authenticated;
+grant usage, select on sequence public.product_sub_items_id_seq to authenticated;
 
 update public.products
 set notes = '', updated_at = coalesce(created_at, now())
