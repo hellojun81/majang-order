@@ -257,10 +257,15 @@ class RetailerProfile {
 
 class AppStore extends ChangeNotifier {
   AppStore() {
-    _loadProducts();
-    _loadOrders();
-    _loadSettings();
-    _loadRetailerApproval();
+    if (AppConfig.hasSupabase) {
+      _restoreSupabaseSession();
+    } else {
+      initializing = false;
+      _loadProducts();
+      _loadOrders();
+      _loadSettings();
+      _loadRetailerApproval();
+    }
   }
 
   static const _productsKey = 'majang_order_products_v1';
@@ -277,6 +282,7 @@ class AppStore extends ChangeNotifier {
   DateTime requestedDeliveryDate = DateTime.now().add(const Duration(days: 1));
   String processingRequest = '';
   UserRole? signedInRole;
+  bool initializing = AppConfig.hasSupabase;
   RetailerApprovalStatus retailerApprovalStatus = RetailerApprovalStatus.pending;
   bool authLoading = false;
   String authEmail = '';
@@ -375,6 +381,41 @@ class AppStore extends ChangeNotifier {
   void updateAuthPassword(String value) => authPassword = value;
   void updateAuthStoreName(String value) => authStoreName = value.trim();
 
+  Future<void> _restoreSupabaseSession() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) {
+      initializing = false;
+      notifyListeners();
+      return;
+    }
+    try {
+      await _hydrateSignedInUser(user);
+    } on PostgrestException catch (error) {
+      authMessage = '로그인 복구 실패: ${error.message}';
+      await Supabase.instance.client.auth.signOut();
+    } finally {
+      initializing = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> _hydrateSignedInUser(User user) async {
+    final profile = await Supabase.instance.client
+        .from('profiles')
+        .select('role, is_approved')
+        .eq('id', user.id)
+        .single();
+    final isAdmin = profile['role'] == 'admin';
+    signedInRole = isAdmin ? UserRole.admin : UserRole.retailer;
+    retailerApprovalStatus = isAdmin || profile['is_approved'] == true
+        ? RetailerApprovalStatus.approved
+        : RetailerApprovalStatus.pending;
+    await _loadSettingsFromSupabase();
+    await _loadProductsFromSupabase();
+    await _loadOrdersFromSupabase();
+    if (isAdmin) await _loadRetailersFromSupabase();
+  }
+
   Future<void> signInWithSupabase() async {
     if (authEmail.isEmpty || authPassword.isEmpty) {
       authMessage = '이메일과 비밀번호를 입력해 주세요.';
@@ -391,20 +432,7 @@ class AppStore extends ChangeNotifier {
       );
       final user = response.user;
       if (user == null) throw const AuthException('로그인 사용자 정보를 확인할 수 없습니다.');
-      final profile = await Supabase.instance.client
-          .from('profiles')
-          .select('role, is_approved')
-          .eq('id', user.id)
-          .single();
-      final isAdmin = profile['role'] == 'admin';
-      signedInRole = isAdmin ? UserRole.admin : UserRole.retailer;
-      retailerApprovalStatus = isAdmin || profile['is_approved'] == true
-          ? RetailerApprovalStatus.approved
-          : RetailerApprovalStatus.pending;
-      await _loadSettingsFromSupabase();
-      await _loadProductsFromSupabase();
-      await _loadOrdersFromSupabase();
-      if (isAdmin) await _loadRetailersFromSupabase();
+      await _hydrateSignedInUser(user);
     } on AuthException catch (error) {
       authMessage = error.message;
     } on PostgrestException catch (error) {
@@ -434,8 +462,8 @@ class AppStore extends ChangeNotifier {
           ? '가입 확인 이메일을 확인한 뒤 로그인해 주세요.'
           : '가입이 완료됐습니다. 도매점 승인을 기다려 주세요.';
       if (response.session != null) {
-        signedInRole = UserRole.retailer;
-        retailerApprovalStatus = RetailerApprovalStatus.pending;
+        final user = response.user;
+        if (user != null) await _hydrateSignedInUser(user);
       }
     } on AuthException catch (error) {
       authMessage = error.message;
@@ -515,9 +543,11 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  void signOut() {
-    if (AppConfig.hasSupabase) Supabase.instance.client.auth.signOut();
+  Future<void> signOut() async {
+    if (AppConfig.hasSupabase) await Supabase.instance.client.auth.signOut();
     signedInRole = null;
+    retailers.clear();
+    orders.clear();
     notifyListeners();
   }
 
@@ -815,12 +845,31 @@ class AuthGate extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = StoreScope.of(context);
+    if (store.initializing) return const AppLoadingPage();
     if (store.signedInRole == null) return const LoginPage();
     if (store.signedInRole == UserRole.retailer && !store.retailerCanOrder) {
       return const ApprovalWaitingPage();
     }
     return const MainShell();
   }
+}
+
+class AppLoadingPage extends StatelessWidget {
+  const AppLoadingPage({super.key});
+
+  @override
+  Widget build(BuildContext context) => const Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 18),
+              Text('로그인 정보를 확인하고 있습니다.'),
+            ],
+          ),
+        ),
+      );
 }
 
 class LoginPage extends StatelessWidget {
