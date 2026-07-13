@@ -1235,12 +1235,29 @@ final initialProducts = [
   Product('미국산 갈비살', '미국산 · 냉장 · 초이스', 'kg', 27900, Icons.kebab_dining, animalType: '소', cutName: '갈비'),
 ];
 
-class ProductsPage extends StatelessWidget {
+class ProductsPage extends StatefulWidget {
   const ProductsPage({super.key});
+
+  @override
+  State<ProductsPage> createState() => _ProductsPageState();
+}
+
+class _ProductsPageState extends State<ProductsPage> {
+  String selectedAnimalType = '전체';
+  String query = '';
 
   @override
   Widget build(BuildContext context) {
     final store = StoreScope.of(context);
+    final normalizedQuery = query.trim().toLowerCase();
+    final filteredProducts = store.products.where((product) {
+      if (!product.isActive) return false;
+      if (selectedAnimalType != '전체' && product.animalType != selectedAnimalType) return false;
+      if (normalizedQuery.isEmpty) return true;
+      return product.name.toLowerCase().contains(normalizedQuery) ||
+          product.cutName.toLowerCase().contains(normalizedQuery) ||
+          product.detail.toLowerCase().contains(normalizedQuery);
+    }).toList();
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
@@ -1249,6 +1266,7 @@ class ProductsPage extends StatelessWidget {
         Text('좋은 고기를 빠르게 발주하세요', style: TextStyle(color: Colors.grey.shade700)),
         const SizedBox(height: 20),
         TextField(
+          onChanged: (value) => setState(() => query = value),
           decoration: InputDecoration(
             hintText: '품목, 부위, 원산지 검색',
             prefixIcon: const Icon(Icons.search),
@@ -1260,11 +1278,34 @@ class ProductsPage extends StatelessWidget {
             ),
           ),
         ),
+        const SizedBox(height: 12),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              for (final animalType in ['전체', '소', '돼지', '닭', '양', '기타']) ...[
+                ChoiceChip(
+                  label: Text(animalType),
+                  selected: selectedAnimalType == animalType,
+                  onSelected: (_) => setState(() => selectedAnimalType = animalType),
+                ),
+                const SizedBox(width: 8),
+              ],
+            ],
+          ),
+        ),
         const SizedBox(height: 22),
         const Text('축종별 상품', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
         const SizedBox(height: 12),
+        if (filteredProducts.isEmpty)
+          const Card(
+            child: Padding(
+              padding: EdgeInsets.all(28),
+              child: Center(child: Text('조건에 맞는 판매 상품이 없습니다.')),
+            ),
+          ),
         for (final animalType in ['소', '돼지', '닭', '양', '기타'])
-          if (store.products.any((product) => product.isActive && product.animalType == animalType)) ...[
+          if (filteredProducts.any((product) => product.animalType == animalType)) ...[
             Padding(
               padding: const EdgeInsets.only(top: 8, bottom: 10),
               child: Row(
@@ -1279,7 +1320,7 @@ class ProductsPage extends StatelessWidget {
                 ],
               ),
             ),
-            ...store.products.where((product) => product.isActive && product.animalType == animalType).map(
+            ...filteredProducts.where((product) => product.animalType == animalType).map(
           (product) => Padding(
             padding: const EdgeInsets.only(bottom: 12),
             child: Card(
