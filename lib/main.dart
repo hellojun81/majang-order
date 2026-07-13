@@ -155,11 +155,18 @@ class Product {
 }
 
 class CartLine {
-  CartLine(this.product, {this.quantity = 1, String? orderUnit})
-      : orderUnit = orderUnit ?? product.unit;
+  CartLine(
+    this.product, {
+    this.quantity = 1,
+    String? orderUnit,
+    this.orderItemId,
+    this.actualQuantity,
+  }) : orderUnit = orderUnit ?? product.unit;
   final Product product;
   int quantity;
   String orderUnit;
+  final int? orderItemId;
+  double? actualQuantity;
 
   bool get requiresActualWeight => orderUnit != product.unit;
   int get estimatedAmount =>
@@ -169,12 +176,16 @@ class CartLine {
         'product': product.toJson(),
         'quantity': quantity,
         'orderUnit': orderUnit,
+        if (orderItemId != null) 'orderItemId': orderItemId!,
+        if (actualQuantity != null) 'actualQuantity': actualQuantity!,
       };
 
   factory CartLine.fromJson(Map<String, dynamic> json) => CartLine(
         Product.fromJson(json['product'] as Map<String, dynamic>),
         quantity: json['quantity'] as int,
         orderUnit: json['orderUnit'] as String?,
+        orderItemId: json['orderItemId'] as int?,
+        actualQuantity: (json['actualQuantity'] as num?)?.toDouble(),
       );
 }
 
@@ -316,6 +327,8 @@ class DemoOrder {
         ),
         quantity: (data['ordered_quantity'] as num).round(),
         orderUnit: orderUnit,
+        orderItemId: data['id'] as int,
+        actualQuantity: (data['actual_quantity'] as num?)?.toDouble(),
       );
     }).toList();
     return DemoOrder(
@@ -333,6 +346,16 @@ class DemoOrder {
 }
 
 enum OrderStage { pending, weighing, customerConfirmation, preparing, rejected }
+
+class FinalOrderInput {
+  const FinalOrderInput({
+    required this.amount,
+    required this.actualQuantities,
+  });
+
+  final int amount;
+  final List<double> actualQuantities;
+}
 
 class RetailerProfile {
   RetailerProfile({
@@ -978,7 +1001,7 @@ class AppStore extends ChangeNotifier {
       final rows = await Supabase.instance.client
           .from('orders')
           .select(
-            'id, order_number, status, estimated_total, final_total, requested_delivery_date, memo, settings_snapshot, order_items(product_id, product_name, ordered_quantity, unit, pricing_unit, settlement_method, unit_price)',
+            'id, order_number, status, estimated_total, final_total, requested_delivery_date, memo, settings_snapshot, order_items(id, product_id, product_name, ordered_quantity, actual_quantity, unit, pricing_unit, settlement_method, unit_price)',
           )
           .order('id', ascending: false);
       orders
@@ -1010,7 +1033,24 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> confirmFinalAmount(DemoOrder order, int amount) async {
+  Future<void> confirmFinalAmount(
+    DemoOrder order,
+    int amount,
+    List<double> actualQuantities,
+  ) async {
+    if (AppConfig.hasSupabase) {
+      for (var index = 0; index < order.lines.length; index++) {
+        final orderItemId = order.lines[index].orderItemId;
+        if (orderItemId != null) {
+          await Supabase.instance.client.from('order_items').update({
+            'actual_quantity': actualQuantities[index],
+          }).eq('id', orderItemId);
+        }
+      }
+    }
+    for (var index = 0; index < order.lines.length; index++) {
+      order.lines[index].actualQuantity = actualQuantities[index];
+    }
     order.finalTotal = amount;
     order.stage = order.settings.requireCustomerConfirmation
         ? OrderStage.customerConfirmation
@@ -1894,34 +1934,86 @@ class OrdersPage extends StatelessWidget {
     AppStore store,
     DemoOrder order,
   ) async {
-    final controller =
+    final amountController =
         TextEditingController(text: order.estimatedTotal.toString());
-    final amount = await showDialog<int>(
+    final weightControllers = [
+      for (final line in order.lines)
+        TextEditingController(
+          text: (line.actualQuantity ?? line.quantity.toDouble())
+              .toStringAsFixed(1),
+        ),
+    ];
+    final result = await showDialog<FinalOrderInput>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('최종금액 확정'),
-        content: TextField(
-          controller: controller,
-          keyboardType: TextInputType.number,
-          autofocus: true,
-          decoration:
-              const InputDecoration(labelText: '실중량 반영 최종금액', suffixText: '원'),
+        title: const Text('실중량·최종금액 확정'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (var index = 0; index < order.lines.length; index++) ...[
+                TextField(
+                  controller: weightControllers[index],
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: InputDecoration(
+                    labelText: '${order.lines[index].product.name} 실중량',
+                    suffixText: order.lines[index].product.unit,
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+              TextField(
+                controller: amountController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: '실중량 반영 최종금액',
+                  suffixText: '원',
+                ),
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context), child: const Text('취소')),
           FilledButton(
             onPressed: () {
-              final value = int.tryParse(controller.text.replaceAll(',', ''));
-              if (value != null && value > 0) Navigator.pop(context, value);
+              final amount = int.tryParse(
+                amountController.text.replaceAll(',', ''),
+              );
+              final weights = weightControllers
+                  .map((controller) => double.tryParse(controller.text))
+                  .toList();
+              if (amount != null &&
+                  amount > 0 &&
+                  weights.every((weight) => weight != null && weight > 0)) {
+                Navigator.pop(
+                  context,
+                  FinalOrderInput(
+                    amount: amount,
+                    actualQuantities: weights.cast<double>(),
+                  ),
+                );
+              }
             },
             child: const Text('확정'),
           ),
         ],
       ),
     );
-    controller.dispose();
-    if (amount != null) store.confirmFinalAmount(order, amount);
+    amountController.dispose();
+    for (final controller in weightControllers) {
+      controller.dispose();
+    }
+    if (result != null) {
+      await store.confirmFinalAmount(
+        order,
+        result.amount,
+        result.actualQuantities,
+      );
+    }
   }
 
   @override
@@ -1963,6 +2055,11 @@ class OrdersPage extends StatelessWidget {
                         .map((line) =>
                             '${line.product.name} ${line.quantity}${line.orderUnit}')
                         .join(' · ')),
+                    if (order.lines.any((line) => line.actualQuantity != null))
+                      Text(
+                        '실중량 ${order.lines.where((line) => line.actualQuantity != null).map((line) => '${line.product.name} ${line.actualQuantity!.toStringAsFixed(1)}${line.product.unit}').join(' · ')}',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
                     const SizedBox(height: 10),
                     Text('예상금액 ${money(order.estimatedTotal)}원'),
                     const SizedBox(height: 6),
