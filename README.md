@@ -71,3 +71,12 @@ git switch -c feature/<기능명>
 ```
 
 기능 개발 후 커밋하고 원격 브랜치로 푸시한 다음 Pull Request로 `main`에 병합합니다.
+
+## 관리자·소매점 동시 테스트
+
+브라우저 탭별 Supabase 로그인 세션을 분리하려면 다음 주소를 사용합니다.
+
+```text
+관리자: http://localhost:8080/?session=admin
+소매점: http://localhost:8080/?session=retailer
+```

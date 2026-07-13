@@ -9,9 +9,21 @@ import 'config/app_config.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   if (AppConfig.hasSupabase) {
+    final sessionSlot = switch (Uri.base.queryParameters['session']) {
+      'admin' => 'admin',
+      'retailer' => 'retailer',
+      _ => null,
+    };
     await Supabase.initialize(
       url: AppConfig.supabaseUrl,
       publishableKey: AppConfig.supabaseAnonKey,
+      authOptions: FlutterAuthClientOptions(
+        localStorage: sessionSlot == null
+            ? null
+            : SharedPreferencesLocalStorage(
+                persistSessionKey: 'majang-order-$sessionSlot-auth',
+              ),
+      ),
     );
   }
   runApp(const MajangOrderApp());
